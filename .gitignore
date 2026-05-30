@@ -1,0 +1,31 @@
+# MATLAB
+*.asv
+*.m~
+*.mat.bak
+*.autosave
+slprj/
+
+# LaTeX build junk
+*.aux
+*.log
+*.out
+*.toc
+*.nav
+*.snm
+*.lof
+*.lot
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.bbl
+*.blg
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Private working material: never publish.
+notes/
+copies/
+.claude/
+*_canonical.mat
