@@ -5,14 +5,18 @@
 ```
 c_k^(i) = c_p * theta_k^(i)
 theta_{k+h}^(i) = c_{h,i}' z_k + d_{h,i}' V_k^(h)
+V_k^(h) = [u_k; ...; u_{k+h-1};  d_{k+1}; ...; d_{k+h}]
 ```
 
 The substation heat extraction `c^(i)` is exactly proportional to the
 bilinear `theta^(i) = (T_s - T_r) * q`, so a predictor for `theta`
 predicts `c`. The lifted state `z_k = psi(xi_k)` is a fixed vector of
 49 functions of the augmented plant state (the base 37-feature lift
-plus a 12-feature exergy block); `V_k^(h)` is the stacked input +
-demand sequence over the prediction horizon h.
+plus a 12-feature exergy block). `V_k^(h)` stacks the applied control
+inputs `u = [T^(0,s); r_q; T^(i,r)]` and the demand forecast `d` over
+the prediction horizon h. The demand is measured/forecast at each
+substation, so it enters as a known input rather than something to
+predict.
 
 One linear fit per (consumer, horizon) pair gives V_seq the direct
 multi-step structure. No recursion, no one-step error accumulation.
@@ -42,27 +46,41 @@ closed-loop delivery the controller cares about.
 
 ## Predictors compared
 
-| name              | structure                                                          |
-|-------------------|--------------------------------------------------------------------|
-| ZOH               | theta_{k+h}^(i) = theta_k^(i)                                       |
-| iterated (A, B)   | z_{k+1} = A z_k + B u_k, applied h times, theta read from z         |
-| **V_seq (this work)** | theta_{k+h}^(i) = c_{h,i}' z_k + d_{h,i}' V_k^(h), per (h, i)   |
+| name              | structure                                                              |
+|-------------------|------------------------------------------------------------------------|
+| ZOH               | theta_{k+h}^(i) = theta_k^(i)                                           |
+| iterated (A, B)   | z_{k+1} = A z_k + B [u_k; d_{k+1}], applied h times, theta read from z  |
+| **V_seq (this work)** | theta_{k+h}^(i) = c_{h,i}' z_k + d_{h,i}' V_k^(h), per (h, i)       |
+
+The iterated baseline gets the same lift, the same demand input, and the
+same operational weighting as V_seq, and its ridge lambda is picked among
+the stable fits (rho(A) < 1) so the rollout never blows up. That keeps it
+an honest opponent: the only thing that differs is direct-multi-step
+versus rolled-out one-step.
 
 V_seq uses split-ridge regularisation: separate lambda for the
 state-coefficient block c and the input-coefficient block d, picked
-on the validation set per (h, i). Inputs scale 35 * h coefficients
-versus 49 state coefficients, so one lambda is the wrong knob.
+on the validation set per (h, i). Inputs scale 40 * h coefficients
+(35 controls + 5 demand, per step) versus 49 state coefficients, so one
+lambda is the wrong knob.
 
 ## Checks (validate_predictor.m)
 
 | #  | Invariant                                                              | Result on the demo set    |
 |----|-------------------------------------------------------------------------|---------------------------|
 | 1  | V_seq RMSE <= ZOH RMSE at every horizon                                 | true, h = 1..16           |
-| 2  | V_seq RMSE < iterated A,B RMSE at h = 16                                | -13.1 % suite mean        |
-| 3  | V_seq 1-step suite R^2 >= 0.7                                           | 0.733                     |
-| 4  | Worst-consumer NRMSE at h = 1 <= 30 % of peak demand                    | 17.9 %                    |
+| 2  | V_seq RMSE < iterated A,B RMSE at h = 16                                | 12.0 % lower, suite mean  |
+| 3  | V_seq 1-step suite R^2 >= 0.7                                           | 0.712                     |
+| 4  | Worst-consumer NRMSE at h = 1 <= 30 % of peak demand                    | 19.2 %                    |
 | 5  | Theta-block contribution to R^2 at h = 1 >= 0.10                        | 0.207                     |
 | 6  | q_{k+1} = a q_k + (1-a) r_q,k on every test trajectory                  | machine precision         |
+
+These run on the held-out PRBS test set. The direct-multi-step gain over
+the iterated baseline is modest there (12 % at h = 16) but large on a
+normal operating day, the regime the controller runs in: there the
+iterated rollout compounds and V_seq is about 3x lower RMSE from h = 5
+onward (see the operational tracking and parity figures). At h = 1 the
+two are equal, as expected for a one-step forecast.
 
 ## Spec equations -> code
 
@@ -70,7 +88,7 @@ versus 49 state coefficients, so one lambda is the wrong knob.
 |--------------------------------------------------------------------------------|------------------------------------------------------------|
 | psi(xi) = 49 features (base 37 + 12 exergy bilinears)                          | predictor_open_loop/koopman/candidate_library.m            |
 | theta_{k+h}^(i) = c_{h,i}' z_k + d_{h,i}' V_k^(h), per (h, i), split-ridge     | predictor_open_loop/koopman/fit_vseq.m                     |
-| z_{k+1} = A z_k + B u_k (iterated baseline)                                    | predictor_open_loop/koopman/fit_iterated.m                 |
+| z_{k+1} = A z_k + B [u_k; d_{k+1}] (demand-aware, stable iterated baseline)    | predictor_open_loop/koopman/fit_iterated.m                 |
 | Per-junction mixing residual g_N(z) used as a soft constraint downstream       | predictor_open_loop/koopman/build_mixing.m                 |
 | q_{k+1} = a q_k + (1 - a) r_q,k,  a = exp(-Ts / eps)                            | shared/plant/flow_dynamics.m                               |
 
@@ -81,6 +99,16 @@ plant. 20 train + 2 val + 3 test. The 3 test trajectories ship with
 the repository under `predictor_open_loop/results/test_*.mat`. The
 full 25-file set can be regenerated with
 `predictor_open_loop/data/generate_data.m`.
+
+The PRBS set gives broadband excitation for the dynamics but spends a lot
+of its time capacity-limited (`c = c_max != d`), which dilutes the demand
+coefficient. To calibrate the predictor for the regime it is deployed in,
+the fit also uses a handful of smooth operating days
+(`predictor_open_loop/results/op_*.mat`, made by
+`predictor_open_loop/data/generate_operational.m`) and weights those
+samples more (`p.o1.op_weight`, a sqrt weight in least squares). This is
+what puts the multi-step parity on the diagonal on a normal day; the PRBS
+test R^2 (T3) is the guard that it does not over-specialise.
 
 PRBS dwell times use pairwise-coprime prime multipliers
 (`[2, 3, 5, 7, 11] * Ts`) so the cycled excitation across edges does

@@ -1,14 +1,15 @@
 function traj = generate_traj(net, z0, p, T_sim, seed)
-% GENERATE_V2_TRAJ  One v2 plant trajectory under multi-channel
+% GENERATE_TRAJ  One plant trajectory under multi-channel
 % PRBS excitation. Returns a struct with every signal the dictionary
-% might want.
+% might want. 
+% One trajectory
 
 [r_q_fun, T0s_fun, ~] = excitation_multi(net, p, T_sim, seed);
 
-% v2 mode: simulator takes the flow reference via p.r_q_fun
+% dynamic-flow mode: simulator takes the flow reference via p.r_q_fun
 p.r_q_fun = r_q_fun;
 u_fun = @(t) T0s_fun(t);
-w_fun = @(t) 1.0;        % ignored in v2 mode but the interface needs it
+w_fun = @(t) 1.0;        % ignored in dynamic-flow mode but the interface needs it
 
 res = simulate_plant(net, z0, p, u_fun, w_fun, T_sim);
 

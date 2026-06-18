@@ -1,9 +1,12 @@
 function M = build_mixing(net)
-% BUILD_MIXING_V2  Find the mixing junctions for tilde g_N(z) = 0.
+% BUILD_MIXING  Find the mixing junctions for tilde g_N(z) = 0.
 %
-% A junction is any non-leaf node with >= 2 incoming edges, where
-% sum_in (T_e - T_v) q_e must equal zero. In our topology this is
-% F7 on the supply side and five return-side junctions (R1..R6).
+% A junction is any non-leaf node with >= 2 incoming edges, where the inflow
+% balance sum_in (T_u - T_v) q_e must equal zero. T_u is the upstream-node outlet
+% on each incoming edge, used as a proxy for the edge-outlet temperature (exact
+% under negligible pipe loss, p.pipe.alpha = 1e-6; the residual target is built
+% this way in extend_vseq_extras). In our topology this is F7 on the supply side
+% and five return-side junctions R1, R2, R3, R4, R6.
 
 n_nodes = numel(net.Nodes);
 n_edges = numel(net.Edges);

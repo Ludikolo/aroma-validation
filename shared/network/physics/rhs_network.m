@@ -16,6 +16,11 @@ function dz = rhs_network(t, z, net, cp, mode, Text, Tin_source)
 %
 % Pipes move heat via advection; nodes mix incoming flows and apply device models.
 % We return dz so the ODE solver can step forward.
+%
+% THEORY index:
+%   line 49: node mixing
+%   line 138: pipe advection
+%   line 216: source
 
 
 E = numel(net.Edges);
@@ -36,6 +41,7 @@ for e = 1:E
                    (q <  0) * Tcells(1);            % outlet is first cell if q < 0
 end
 
+% THEORY (node mixing): outlet temp = flow-weighted average of incoming streams
 %% 2) Node mixing (incoming streams only)
 % Flow-weighted average of all streams entering the node.
 % Falls back to ambient if no inflow.
@@ -124,6 +130,7 @@ for n = 1:N
     end
 end
 
+% THEORY (pipe advection): upwind transport along the flow plus heat loss to ambient
 %% 4) Pipe dynamics (upwind advection + ambient exchange)
 % For each pipe, compute the time derivative for all its cells:
 % - advection: shift temperature along the flow direction
@@ -201,6 +208,7 @@ for n = 1:N
                     Fin  = qloc / max(rho,1e-9);         % volumetric inflow [m^3/s]
                     denom = max(rho*cp_loc*V, 1e-9);     % avoid division by zero
 
+                    % THEORY (source): first order energy balance, outlet follows the command T_0s with a lag (this is T_F0)
                     % Energy balance: rho*cp*V * dT/dt = rho*cp*Fin*(Tin - T) + kQ*(Tc - T)
                     dTdt = (rho*cp_loc*Fin*(Tin_w - T_int) + kQ*(Tc - T_int)) / denom;
                     dz(off) = dTdt;

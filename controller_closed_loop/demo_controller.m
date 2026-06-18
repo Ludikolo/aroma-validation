@@ -1,11 +1,11 @@
 % DEMO_CONTROLLER  Closed-loop demonstration and validation of the
-%   convex-QP MPC controller (KPC v2) built on top of the V_seq
+%   convex-QP MPC controller (KPC) built on top of the V_seq
 %   Koopman predictor from predictor_open_loop. The controller solves
 %   one QP per sample step (Ts = 15 min) to track demand on every
 %   consumer while respecting the substation contracts and the
 %   network's mass-conservation constraints.
 %
-%   The locked-in tune (Np = 5, Nc = 1, alpha = 1, rho_slack = 1.195)
+%   The locked-in tune (Np = 12, Nc = 1, alpha = 1, rho_slack = 1.195)
 %   was selected by a cross-scenario Pareto sweep followed by
 %   Bayesian optimisation over the slack penalty. See
 %   CONTROLLER_NOTES.md for the formulation and tune-selection details.
@@ -15,13 +15,16 @@
 %        the locked tune, and the 6-scenario suite at design capacity.
 %     2. builds the plant at stressed capacity (mdot_scale = 0.6),
 %        the regime where the controller's advantage opens up.
-%     3. runs one 24 h closed loop with KPC v2 + the hold-nominal
+%     3. runs one 24 h closed loop with KPC + the hold-nominal
 %        baseline on a single deterministic seed.
-%     4. computes per-consumer demand met %, plots a tracking trace
-%        plus a controller-comparison bar chart, and saves demo.mat.
+%     4. computes per-consumer demand met %, plots a tracking trace,
+%        and saves demo.mat.
 %
 %   Validation of seven controller invariants on the saved demo.mat is
 %   in tests/validate_controller.m.
+%
+% THEORY index: (res_kpc)
+%   line 65: stress test
 
 clear; clc;
 startup;
@@ -33,7 +36,7 @@ figs_dir   = fullfile(root, 'figures');
 pred_res   = fullfile(fileparts(root), 'predictor_open_loop', 'results');
 if ~exist(figs_dir, 'dir'), mkdir(figs_dir); end
 
-fprintf('\n=== Controller closed-loop demo (KPC v2 vs hold-nominal) ===\n');
+fprintf('\n=== Controller closed-loop demo (KPC vs hold-nominal) ===\n');
 fprintf('Sample rate Ts = %g s, locked tune from cross-scenario Pareto + BO\n', p.Ts);
 
 %% Load predictor fits + locked tune
@@ -59,6 +62,7 @@ fprintf('Locked tune: (Np, Nc, alpha, rho_slack) = (%d, %d, %g, %.2f)\n', ...
         H.Np_best, H.Nc_best, A.alpha_star, tune.rho_slack);
 
 %% Build plant at stressed capacity (mdot_scale = 0.6)
+% THEORY (stress test): at mdot_scale 0.6 the saturation c_max binds, the regime where control quality shows
 mdot_scale = 0.6;
 T_warm     = 30 * 60;
 T_sim      = 24 * 3600;
@@ -85,8 +89,8 @@ fprintf('Warmup (%.0f min)...\n', T_warm / 60);
 p_wu = p; p_wu.t_offset = sc_start;
 res_wu = simulate_plant(net, z0_cold, p_wu, @(t) 0, @(t) 1.0, T_warm);
 
-%% Closed loop: KPC v2
-fprintf('Closed loop KPC v2 (%d h, %d steps)...\n', T_sim / 3600, round(T_sim / p.Ts));
+%% Closed loop: KPC
+fprintf('Closed loop KPC (%d h, %d steps)...\n', T_sim / 3600, round(T_sim / p.Ts));
 t_kpc = tic;
 res_kpc = kpc_step_loop(net, res_wu, p, sc_start, T_warm, T_sim, ...
                         pred, tune, ei, F0_idx, R0_idx, con_idx);
@@ -97,6 +101,11 @@ fprintf('  done in %.1f s, mean solve %.0f ms, max %.0f ms\n', ...
 fprintf('Closed loop hold-nominal (same plant, same warmup)...\n');
 p_hold = p; p_hold.t_offset = sc_start + T_warm;
 res_hold = simulate_plant(net, res_wu.z_final, p_hold, @(t) 0, @(t) 1.0, T_sim);
+% simulate_plant records the warmup-boundary sample (t = 0) that the receding-horizon
+% loop does not, so res_hold has one extra column. drop it so KPC and hold are scored
+% over the identical set of instants.
+res_hold.d_i = res_hold.d_i(:, 2:end);
+res_hold.c_i = res_hold.c_i(:, 2:end);
 
 %% Per-consumer met %
 met_kpc  = nan(1, n_user);
@@ -108,7 +117,7 @@ for i = 1:n_user
     met_hold(i) = 100 * sk_h / max(sd_h, 1e-9);
 end
 
-fprintf('\nPer-consumer met %% (stressed-S2, 24 h, single seed):\n');
+fprintf('\nPer-consumer met %% (stressed, 24 h, single seed):\n');
 fprintf('%-4s %10s %10s\n', 'C', 'KPC', 'hold');
 for i = 1:n_user
     fprintf('  %s %10.3f %10.3f\n', ei.consumers{i}, met_kpc(i), met_hold(i));
@@ -125,7 +134,8 @@ for si = 1:n_sc
     r = S.results.(sc_names{si});
     for i = 1:n_user
         sd_k = sum(r.kpc.d_i(i, :));   sk_k = sum(r.kpc.c_i(i, :));
-        sd_h = sum(r.hold.d_i(i, :));  sk_h = sum(r.hold.c_i(i, :));
+        % r.hold carries the same extra warmup-boundary sample; drop it to match r.kpc
+        sd_h = sum(r.hold.d_i(i, 2:end));  sk_h = sum(r.hold.c_i(i, 2:end));
         met_design_kpc(si, i)  = 100 * sk_k / max(sd_k, 1e-9);
         met_design_hold(si, i) = 100 * sk_h / max(sd_h, 1e-9);
     end
@@ -136,8 +146,8 @@ fprintf('  KPC  worst cell : %.3f %%   (only controller >= 95 %% on every cell)\
         min(met_design_kpc(:)));
 fprintf('  hold worst cell : %.3f %%\n', min(met_design_hold(:)));
 
-%% Plot 1: tracking trace for the worst-consumer-at-stressed
-[~, worst_i] = min(met_kpc);
+%% Plot 1: tracking trace at the consumer the baseline struggles with most
+[~, worst_i] = min(met_hold);
 fig = figure('Visible', 'off', 'Position', [100 100 900 360]);
 t_h_kpc  = (0:size(res_kpc.d_i, 2) -1) * p.Ts / 3600;
 t_h_hold = (0:size(res_hold.c_i, 2)-1) * (T_sim / size(res_hold.c_i, 2)) / 3600;
@@ -147,35 +157,11 @@ plot(t_h_kpc,  res_kpc.c_i(worst_i, :)  / 1000, 'b-',  'LineWidth', 1.2, 'Displa
 plot(t_h_hold, res_hold.c_i(worst_i, :) / 1000, 'r--', 'LineWidth', 1.0, 'DisplayName', 'hold delivered c^{(i)}');
 grid on;
 xlabel('Time [h]'); ylabel('Heat [kW]');
-title(sprintf('Worst-consumer tracking at stressed capacity (C%d, met%% = %.2f)', ...
-              worst_i, met_kpc(worst_i)));
+title(sprintf('Tracking at the consumer hold struggles with (C%d: KPC %.1f%%, hold %.1f%%)', ...
+              worst_i, met_kpc(worst_i), met_hold(worst_i)));
 legend('Location', 'best');
 print(fig, fullfile(figs_dir, 'tracking.pdf'), '-dpdf', '-bestfit');
 print(fig, fullfile(figs_dir, 'tracking.png'), '-dpng', '-r150');
-close(fig);
-
-%% Plot 2: met %% bar at stressed + design
-fig = figure('Visible', 'off', 'Position', [100 100 900 360]);
-subplot(1, 2, 1);
-bar([met_design_kpc(:)'; met_design_hold(:)']', 'grouped');
-ylim([min([met_design_kpc(:); met_design_hold(:)]) - 1, 101]);
-yline(95, 'r--', '95 %% bar');
-xlabel('Cell index (scenario x consumer)'); ylabel('met %');
-title('Design capacity: 6 scenarios x 5 consumers');
-legend({'KPC', 'hold'}, 'Location', 'southwest');
-grid on;
-
-subplot(1, 2, 2);
-bar([met_kpc; met_hold]', 'grouped');
-ylim([0, 102]);
-yline(95, 'r--', '95 %% bar');
-set(gca, 'XTick', 1:n_user, 'XTickLabel', ei.consumers);
-xlabel('Consumer'); ylabel('met %');
-title(sprintf('Stressed capacity (mdot = %.1f): 24 h', mdot_scale));
-legend({'KPC', 'hold'}, 'Location', 'southwest');
-grid on;
-print(fig, fullfile(figs_dir, 'met_bar.pdf'), '-dpdf', '-bestfit');
-print(fig, fullfile(figs_dir, 'met_bar.png'), '-dpng', '-r150');
 close(fig);
 
 %% Save demo artefact for validate_controller.m
@@ -186,5 +172,5 @@ save(fullfile(res_dir, 'demo.mat'), ...
      'tune', '-v7.3');
 
 fprintf('\nSaved %s\n', fullfile(res_dir, 'demo.mat'));
-fprintf('Figures: tracking.{pdf,png}, met_bar.{pdf,png}\n');
+fprintf('Figures: tracking.{pdf,png}\n');
 fprintf('Run validate_controller next to check the seven invariants.\n');

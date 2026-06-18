@@ -10,6 +10,9 @@ function Q = compute_prosumer_Q(t, prm)
 %
 % Shape references: IEA Annex 60 neighbourhood benchmark; ORNL commercial
 % and residential hourly load profiles.
+%
+% THEORY index:
+%   line 33: demand model
 
 Q_peak = prm.Q_peak;
 
@@ -27,6 +30,7 @@ end
 
 t_day = mod(t/3600, 24);   % hour of day in [0, 24)
 
+% THEORY (demand model): three daily profile shapes per consumer type, also used as the MPC forecast
 switch lower(prm.profile)
     case 'flat'
         Q = Q_peak;

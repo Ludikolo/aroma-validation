@@ -24,8 +24,6 @@ slprj/
 .DS_Store
 Thumbs.db
 
-# Private working material: never publish.
+# local working folders
 notes/
 copies/
-.claude/
-*_canonical.mat

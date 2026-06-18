@@ -1,4 +1,4 @@
-% VALIDATE_CONTROLLER  Check the KPC v2 closed-loop controller
+% VALIDATE_CONTROLLER  Check the KPC closed-loop controller
 %   against seven invariants on the saved demo trajectories.
 %
 %   Run demo_controller first (or rely on the precomputed demo.mat in

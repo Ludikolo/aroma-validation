@@ -1,5 +1,5 @@
 function idx = edge_user_index(net)
-% EDGE_USER_INDEX  Supply / return / user edge sets for v2.
+% EDGE_USER_INDEX  Supply / return / user edge sets.
 %
 % Three edge groups in the spec: E_s (supply), E_r (return),
 % one user-flow q^(i) per consumer carried by the F*->C_i stub.

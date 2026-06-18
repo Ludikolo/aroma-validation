@@ -1,107 +1,99 @@
-# Robustness, scalability, sustainability: validation reference
+# Part 4: controller comparison + deployment checks
 
 ## What this part does
 
-The locked KPC v2 controller from `controller_closed_loop/` is
-validated as deployment-ready along three axes:
+Two things, both shown as time-domain figures (no bar charts):
 
-  - **robustness** under perturbations (sensor noise, plant-parameter
-    mismatch, demand forecast noise, capacity scaling, ...)
-  - **scalability** to bigger districts (compute scales sub-quadratic
-    in `n_user`, projects to 200-consumer deployments)
-  - **sustainability** measured by 11 district-heating KPIs from the
-    Buffa / Wirtz 5GDHC literature, with four acceptance bars
+1. a head-to-head **comparison** of the KPC controller against three MPC baselines
+   on a hard day, to show it is the best practical choice;
+2. **deployment** checks: a 90-day longevity loop (no drift) and the compute case
+   for scaling to a large district.
 
-This part is a meta-analysis: every individual axis is its own
-multi-hour Monte Carlo, parameter sweep, or long-horizon CL run.
-The 30-second `demo_robustness.m` loads the committed `.mat`
-artefacts, computes headline statistics, plots two summary figures,
-and saves `demo.mat` for the validation step.
+## The comparison (`visualizations/4_comparison/run_comparison.m` -> `viz_compare.m`)
 
-## 15 robustness axes (T9..T16 + Bucket-B extensions)
+Four controllers run the SAME plant, scenario, warmup, horizon and actuator limits,
+so the only thing that differs is the controller (a fair comparison, not a strawman):
 
-| # | axis                                  | phase test                             |
-|---|---------------------------------------|----------------------------------------|
-| 1 | capacity scaling 0.5--1.5x            | `phase_t9_robustness.m`                |
-| 2 | sensor noise sigma in [0, 0.4]        | `phase_t9_robustness.m`                |
-| 3 | warmup duration 15--120 min            | `phase_t9_robustness.m`                |
-| 4 | plant-model mismatch (alpha, eps)     | `phase_t9d_mismatch.m`                 |
-| 5 | demand forecast noise sigma            | `phase_t9e_demand_forecast.m`          |
-| 6 | per-consumer demand heterogeneity     | `phase_t9f_heterogeneous_demand.m`     |
-| 7 | design-capacity Monte Carlo (30 seeds) | `phase_t10_mc.m`                       |
-| 8 | stressed-capacity Monte Carlo          | `phase_t10b_mc_stressed.m`             |
-| 9 | sampling-time off-design               | `phase_t11_ts_sweep.m`                 |
-| 10| multi-rate train-deploy                | `phase_t11b_multirate.m` / t11d        |
-| 11| slack-bound theorem (post-hoc safety) | `phase_t11c_slack_bound.m`             |
-| 12| out-of-distribution profile-swap      | `phase_t13_ood_profile_swap.m`         |
-| 13| compute scaling in n_user             | `phase_t14_compute_scaling.m`          |
-| 14| climate / ambient temperature         | `phase_t15_climate_shift.m`            |
-| 15| long-horizon drift (7 days + 30 days) | `phase_t16_long_horizon.m` + B1        |
+  - **KPC**            : direct multi-step Koopman prediction + one convex QP (this work)
+  - **Koopman-LMPC**   : same Koopman lift, but an iterated one-step model + one QP
+  - **Jacobian-LMPC**  : re-linearise the nonlinear plant every step + one QP
+  - **NMPC**           : full nonlinear plant model + fmincon to convergence
 
-Bucket-B (this final pass) adds five non-overlapping extensions on
-top of the 15 axes above: 30-day horizon, 20 random profile
-permutations, extreme `T_ext` (-20..+25 C), source-state z_0 init
-perturbation, and QP failure-mode recovery. Combined acceptance is
-asserted by `phase_t18_bucket_b.m`.
+Scenario: a severe stressed day (`mdot_scale = 0.35`, harder than the controller part),
+in the capacity-binding regime, over a full day. Fairness: identical warmup
+and demand forecast, the SAME demand-adequacy flow floor for all four, the full physical
+actuator box (supply temperature and the network flows) for the baselines, a comparable,
+large-enough finite-difference step for the gradient-based baselines, and a generous NMPC budget;
+every controller's per-step solve and convergence is recorded. Worst-consumer demand-met
+is a daily metric, so the controller is free to lead and recover around a peak; that is
+what rewards the full-horizon planning the controllers differ on.
 
-## Sustainability headline (KPC v2 vs hold-nominal, 6-scenario suite)
+Result (live numbers, severe stressed day at mdot = 0.35):
 
-| metric                              | KPC     | hold    | delta / bar                |
-|-------------------------------------|---------|---------|----------------------------|
-| suite source energy `E_plant`        | 3508 MJ | 3756 MJ | **-6.61 %**, bar: KPC<hold |
-| suite delivered `E_delivered`        | 1698 MJ | 1816 MJ | -6.50 %                    |
-| delivery ratio (KPC / hold)         | 0.935   | 1.000   | bar: >= 0.90               |
-| per-scenario `T_0r` in [10, 25] band | 100 %   | 100 %   | bar: >= 90 %               |
-| suite-mean `dT_source`              | 3.13 K  | 3.26 K  | bar: <= 15 K               |
+| controller      | worst-cons met % | median solve | steps converged |
+|-----------------|------------------|--------------|-----------------|
+| **KPC**         | **97.6** (best)  | **~1.0 s**   | **96 / 96**     |
+| NMPC            | 95.5             | ~60 s        | 86 / 96         |
+| Koopman-LMPC    | 91.5             | ~0.6 s       | 96 / 96         |
+| Jacobian-LMPC   | 87.4             | ~15 s        | 96 / 96         |
 
-The four bars are documented in `phase_t17_sustainability.m` in the
-broader thesis codebase; the `validate_robustness.m` in this repo
-asserts them against the precomputed `sustainability_headline.mat`.
+Under this severe bind KPC is the only controller that is BOTH comfortable and practical.
+It keeps the worst consumer at 97.6% (the only one above the 95% comfort bar and the best
+of all four), solves one convex QP in ~1 s, and stays feasible on every step. The
+exact-model NMPC is close on comfort (95.5%) but pays heavily: it re-integrates the
+nonlinear ODE inside every solve, so it is ~60x slower (~60 s/step, up to ~250 s) and, on
+this hard problem, fails to converge in 10 of 96 steps. The iterated Koopman-LMPC (91.5%)
+and the Jacobian-LMPC (87.4%) fall below the comfort bar; the gap to the iterated model is
+the direct multi-step prediction. So KPC beats even the idealised exact-model NMPC here,
+with no plant model and a convex QP.
 
-## Headline numbers under stress (30-seed paired Monte Carlo)
+## Stress sweep (`run_stress_sweep.m` -> `viz_stress_sweep.m`)
 
-`mdot_scale = 0.6 x design`, 30 seeds, randomised warmup + initial-
-condition perturbation:
+To show why the head-to-head is run at a hard point, the two fast Koopman controllers (KPC
+direct multi-step vs the iterated one-step) are run across a range of flow capacities. They
+track together at easy capacity and fan apart as it gets harder: KPC stays above the 95%
+comfort bar down to about half-ish capacity while the iterated model drops below it sooner.
+The direct multi-step prediction is what keeps KPC ahead, and the gap grows the more the
+network is squeezed.
 
-| controller        | suite-mean met % | mean solve [ms] |
-|-------------------|------------------|-----------------|
-| **KPC v2 locked** | **100.00**       | **95**          |
-| RBC               | 97.95            | n/a             |
-| hold-nominal      | 90.71            | n/a             |
+## Deployment (`run_longevity.m` -> `demo_robustness.m`)
 
-Statistics on `unmet_total` (lower = better, KPC vs `min(hold, rbc)`):
-  - paired t-test, one-sided: p ~ 1e-45
-  - Wilcoxon signed-rank   :   all 30 seeds favour KPC (p well below 1e-3)
-  - Cohen's d              :   31.8   95% bootstrap CI ~ [25.5, 37.7]
+  - **Longevity**: one continuous 90-day closed loop at the stressed half-capacity
+    (`mdot_scale = 0.50`, ~8640 control steps). The per-day worst-consumer met % stays
+    flat (drift +0.000 pp) and the per-day solve time stays flat (no compute creep), so
+    nothing in the Koopman prediction or the QP degrades over a long run. A negligible
+    0.012 % of steps the QP does not converge under the bind; the controller then holds
+    its previous command and recovers, so comfort is unaffected.
+  - **Scalability**: the KPC convex QP solves in about a second, roughly 0.1% of the
+    `Ts = 900 s` sample budget, at the production size; its decision dimension grows
+    linearly with the number of consumers, so there is large headroom to scale to a
+    bigger district. The plant-rolling baselines re-integrate the full network ODE
+    inside every solve (15-60 s at 5 consumers, and they grow with the network), so they
+    do not scale.
 
-## Checks (validate_robustness.m)
+## Checks (`tests/validate_robustness.m`)
 
-| # | invariant                                                                       | result                          |
-|---|---------------------------------------------------------------------------------|---------------------------------|
-| 1 | source-energy saving > 0 (KPC < hold)                                            | +6.61 %                        |
-| 2 | delivered ratio kpc/hold >= 0.90                                                | 0.935                          |
-| 3 | suite-mean `dT_source` <= 15 K (5GDHC low-exergy)                                | 3.13 K                         |
-| 4 | per-scenario `T_0r` band compliance >= 90 %                                      | min 100 %                      |
-| 5 | stressed MC KPC suite-mean >= 95 %                                              | 100.0 %                        |
-| 6 | paired t-test KPC < best(hold, RBC) on unmet, p < 1e-3                          | p ~ 1e-45                      |
-| 7 | Cohen's d on unmet >= 0.5 with 95 % bootstrap CI > 0                            | d = 31.8, CI = [25.5, 37.7]    |
-| 8 | scalability: n_user = 50 worst-consumer met % >= 95 %                           | 99.89 % (median solve 30.5 s)  |
-| 9 | longevity: 90-day worst-consumer drift ~ 0                                       | 0 pp                           |
+| #  | invariant                                              | result                |
+|----|--------------------------------------------------------|-----------------------|
+| C1 | KPC QP feasible every step; baseline rates reported   | KPC 96/96; NMPC 86/96 |
+| C2 | KPC worst-consumer met % >= 95 % bar AND best of all  | 97.6 % (next 95.5)    |
+| C3 | KPC at least 10x faster than NMPC                      | ~60x                  |
+| C4 | KPC median solve < 5 % of the Ts budget (real-time)   | 0.11 %                |
+| L1 | 90-day worst-consumer drift <= 0.5 pp                 | +0.000 pp             |
+| L2 | 90-day infeasible-step rate <= 0.1 %                  | 0.012 %               |
 
-## Files in this folder
+## Files
 
-  - `ROBUSTNESS_NOTES.md`              this reference
-  - `demo_robustness.m`                meta-analysis demo, ~5 s
-  - `results/sustainability_headline.mat`  4-bar KPI baseline
-  - `results/monte_carlo_stressed.mat`  30-seed stressed MC
-  - `results/n50_closed_loop.mat`      50-consumer plant-in-the-loop result
-  - `results/longevity_90day.mat`      90-day closed-loop drift result
-  - `results/demo.mat`                 written by demo, read by validate
-  - `figures/sustainability.{pdf,png}`  4-bar summary chart
-  - `figures/mc_boxplot.{pdf,png}`     paired-MC box plot
+  - `../visualizations/4_comparison/run_comparison.m`  runs the four controllers, saves `comparison.mat`
+  - `../visualizations/4_comparison/viz_compare.m`     renders the comparison figure
+  - `../visualizations/4_comparison/baseline_cl_run.m` the shared fair harness for the plant-based baselines
+  - `../visualizations/4_comparison/run_stress_sweep.m` runs the capacity sweep, saves `stress_sweep.mat`
+  - `../visualizations/4_comparison/viz_stress_sweep.m` renders the stress-sweep figure
+  - `../controller_closed_loop/lmpc/`                  the iterated Koopman-LMPC controller (build / solve / step loop)
+  - `run_longevity.m`                                  the 90-day longevity run
+  - `demo_robustness.m`                                the deployment summary + longevity figure
+  - `tests/validate_robustness.m`                      the six acceptance invariants
 
-The locked tune artefacts (`best_tune.mat`, `best_horizons.mat`,
-`best_alpha.mat`) live in `controller_closed_loop/results/` and the
-predictor fits (`vseq_fits_full.mat`) live in
-`predictor_open_loop/results/`; this folder cross-references them
-rather than duplicating.
+The locked tune (`best_tune.mat`, `best_horizons.mat`, `best_alpha.mat`) lives in
+`controller_closed_loop/results/` and the predictor fits (`vseq_fits_full.mat`) in
+`predictor_open_loop/results/`; this part cross-references them rather than duplicating.

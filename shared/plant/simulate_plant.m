@@ -29,11 +29,18 @@ function result = simulate_plant(net, z0, p, u_fun, w_fun, T_sim)
 %     via q_{k+1} = a.*q_k + b.*r_q,k. When set, w_fun is ignored for
 %     flow scaling. Legacy callers without p.r_q_fun keep the old
 %     scalar-w behaviour.
+%
+% THEORY index:
+%   line 215: sampled data
 
 Ts = p.Ts;
 t_sample = 0 : Ts : T_sim;
 N = numel(t_sample);
 ode_opts = odeset('RelTol', 1e-6, 'AbsTol', 1e-8, 'MaxStep', Ts);
+% optional solver-tolerance override for numerical verification; default unchanged
+if isfield(p, 'ode_reltol') && ~isempty(p.ode_reltol)
+    ode_opts = odeset(ode_opts, 'RelTol', p.ode_reltol, 'AbsTol', p.ode_reltol * 1e-2);
+end
 
 % Time offset so compute_prosumer_Q sees absolute time-of-day, not
 % the simulator-internal 0..Ts. The CL runner sets this every step.
@@ -49,7 +56,7 @@ if isfield(p, 'flow_mode') && ~isempty(p.flow_mode)
 end
 is_demand_driven = strcmp(flow_mode, 'demand_driven');
 
-if is_demand_driven
+if is_demand_driven %flow is calculated by driven (other test)--> now is off
     dT_L     = p.demand.delta_T_L;
     Q_design = p.cp * p.mdot_nom * dT_L;         % [W] denominator for w
     % w_max_flow may be a scalar (constant capacity) or @(t) for a
@@ -70,7 +77,7 @@ ei      = edge_user_index(net);
 n_edges = numel(net.Edges);
 all_e   = 1:n_edges;
 
-% --- per-consumer indexing (Phase 3) ---------------------------------
+% --- per-consumer indexing -------------------------------------------
 % T_s^i = outlet of the F*->C_i supply stub (= what the substation sees).
 % T_r^i = post-substation node temperature at C_i.
 % Reading the stub outlet from z directly avoids the small lag artefact
@@ -112,7 +119,7 @@ result.q_edges = zeros(n_edges, N);
 result.q_users = zeros(ei.n_user, N);
 result.edge_idx = ei;
 
-% per-consumer traces (Phase 3): T_s, T_r, demanded d_i, realised c_i [W]
+% per-consumer traces: T_s, T_r, demanded d_i, realised c_i [W]
 result.T_s_i = zeros(ei.n_user, N);
 result.T_r_i = zeros(ei.n_user, N);
 result.d_i   = zeros(ei.n_user, N);
@@ -209,6 +216,7 @@ for k = 1:N
     % integrate one sample
     if k < N
         odefun = @(t, z) rhs_network(t, z, net, p.cp, p.mode, p.Text, Tin_fun);
+        % THEORY (sampled data): plant runs continuously, controller acts every Ts = 900 s (zero order hold)
         [~, Z] = ode45(odefun, [t_now, t_now + Ts], z_cur, ode_opts);
         z_cur = Z(end, :)';
     end

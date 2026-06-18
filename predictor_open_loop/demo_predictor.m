@@ -94,7 +94,7 @@ for hi = 1:n_h
             % iterated one-step rollout from (A, B): apply h times
             z_it = phi_z;
             for s = 0:h-1
-                z_it = fit_iter.A * z_it + fit_iter.B * T.U(:, k + s);
+                z_it = fit_iter.A * z_it + fit_iter.B * [T.U(:, k+s); T.D(:, k+s+1)];
             end
             theta_iter = z_it(theta_idx);
 
@@ -180,15 +180,15 @@ fprintf('T2 pass: V_seq beats iterated at h = %d by %.1f %% RMSE (suite mean)\n'
 
 % T3: 1-step suite R^2 >= 0.7. A linear lift over a 49-feature exergy
 % dictionary should explain at least 70 % of the next-step variance
-% on the test set. Korda & Mezic 2018 and the v1 paper both report
-% R^2 > 0.9 at h = 1 on the same plant family, so 0.7 is a strict
-% lower bound for a usable predictor.
+% on the test set. Korda & Mezic 2018 reports R^2 > 0.9 at h = 1 on a
+% similar plant family, so 0.7 is a strict lower bound for a usable
+% predictor.
 suite_R2_h1 = mean(R2_vseq_h1);
 assert(suite_R2_h1 >= 0.7, ...
        'T3 fail: suite R^2 at h = 1 is %.3f, below 0.7', suite_R2_h1);
 fprintf('T3 pass: V_seq 1-step suite R^2 = %.3f (>= 0.7)\n', suite_R2_h1);
 
-% T4: 1-step NRMSE <= 30 %. The TS900 migration plan's acceptance
+% T4: 1-step NRMSE <= 30 %. The acceptance
 % bar for the V_seq fit: per-consumer RMSE at h = 1 below 30 % of
 % peak demand. Stricter than T3 and per-consumer rather than suite.
 max_nrmse_h1 = max(100 * rmse_vseq(1, :) ./ d_max);
@@ -198,7 +198,7 @@ fprintf('T4 pass: worst-consumer NRMSE at h = 1 = %.1f %% (<= 30 %%)\n', max_nrm
 
 % T5: the theta block in the dictionary is load-bearing. Drop it,
 % refit V_seq, R^2 at h = 1 must drop substantially. Threshold from
-% the v1 ablation: theta contributes >= 0.10 R^2.
+% the ablation: theta contributes >= 0.10 R^2.
 F_ablate = load(fullfile(results_dir, 'dict_block_ablation.mat'));
 hi_1     = find(F_ablate.horizons_report == 1);
 R2_full  = mean(F_ablate.R2_buildup(end, hi_1, :));

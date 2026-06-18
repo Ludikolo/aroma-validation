@@ -60,9 +60,9 @@ for c = 1:ei.n_user
     e_user  = ei.user(c);                % the F* -> C_i supply stub edge
     Ci_idx  = find_node(net, Ci);
 
-    % supply: F0 row gets +1 for this user's r_q (Q_net contribution).
-    %         C_i row gets -1 for this user's r_q (consumer outflow).
-    b_s_sel(F0_row,        e_user) = +1;
+    % supply: the C_i row -1 is the actual Q_net coupling for this user's
+    %         r_q (consumer outflow). The F0 supply row is dropped below for
+    %         full rank, so no F0 entry is set here.
     b_s_sel(sn_row(Ci_idx), e_user) = -1;
 
     % return: R0 row stays zero because the closure absorbs Q_net here

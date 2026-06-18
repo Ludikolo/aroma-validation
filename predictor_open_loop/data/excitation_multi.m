@@ -1,9 +1,12 @@
 function [r_q_fun, T0s_fun, info] = excitation_multi(net, p, T_sim, seed_base)
-% EXCITATION_MULTI  Multi-channel excitation for the v2 plant.
+% EXCITATION_MULTI  Multi-channel excitation for the plant.
 %
 % Per-edge PRBS on r_q in [lo*mdot, hi*mdot] with dwell times cycled
 % across channels so the data matrix stays well conditioned. T_0s gets
 % its own PRBS on the dTc offset.
+%
+% THEORY index:
+%   line 27: excitation
 
 if nargin < 4 || isempty(seed_base), seed_base = 0; end
 
@@ -21,6 +24,7 @@ T0s_dwell = p.excite.T0s_dwell_s;
 
 % per-edge PRBS for r_q. Cycle through the dwell list so neighbouring
 % channels do not switch on the same grid -> better conditioning.
+% THEORY (excitation): independent PRBS per edge with coprime dwell times keeps the data well conditioned (PE)
 R_q = zeros(n_edges, N);
 for j = 1:n_edges
     dwell_j = dwells(mod(j-1, numel(dwells)) + 1);

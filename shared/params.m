@@ -1,4 +1,6 @@
 function p = params()
+% All the parameters
+%
 % PARAMS  Plant parameters for the AROMA 5GDHC simulator.
 %   Every script reads parameters through this function so there are
 %   no magic numbers scattered across the codebase.
@@ -56,7 +58,7 @@ p.consumer.T_r_min = 15;
 
 %% Flow mode
 % 'exogenous'     : w(t) provided by the simulation script (default).
-% 'demand_driven' : w(t) = min(w_max, sum demand / (cp * mdot_nom * dT_L)).
+% 'demand_driven' : w(t) = min(w_max, sum demand / (cp * mdot_nom * dT_L)). 
 p.flow_mode = 'exogenous';
 
 % Demand-driven configuration (ignored in exogenous mode).
@@ -68,7 +70,7 @@ p.demand.w_max_flow  = 1.5;
 %% Sample period
 % Discrete cadence at which the trajectory is read out and the
 % first-order flow update q_{k+1} = a q_k + (1-a) r_q,k runs. The
-% pipe transport ODE itself integrates in continuous time (ode15s)
+% pipe transport ODE itself integrates in continuous time (ode45)
 % and is independent of this choice.
 p.Ts = 900;
 
@@ -85,14 +87,19 @@ p.flow_dyn.epsilon_user   = 300;
 % so the predictor RMSE-vs-horizon curve is directly readable.
 p.o1.H_max = 16;
 
+% Operational days weigh more in the predictor fit so the demand coefficient
+% matches the operating point; PRBS still provides the broadband excitation.
+p.o1.op_weight = 8;
+
 % Dictionary configuration.
 %   delay_lags         lag indices for the source-temperature embedding
 %                      (Takens 1981): keep short at Ts = 900 since one
 %                      pipe transit fits in 1-3 samples.
-%   use_delayed_bilinear adds T_F0(k-d) * q^(i) features (best v1 block).
+%   use_delayed_bilinear adds T_F0(k-d) * q^(i) features (best block).
 %   use_substation_extras gates the saturation / regime / diurnal trig
 %                      block. Off by default: it improves h = 1 R^2 but
 %                      worsens long-horizon V_seq under the same data.
+% THEORY (dictionary flags): on/off switches for lift blocks; delays + bilinears + exergy on gives n_z = 49
 p.o2.use_delays            = true;
 p.o2.use_flow_disc         = false;
 p.o2.use_delayed_bilinear  = true;
@@ -117,6 +124,9 @@ p.data.rng_seed   = 42;
 % Dwell times are pairwise coprime ([2 3 5 7 11] * Ts at Ts = 900) so
 % cycled PRBS across edges does not phase-lock at long horizons
 % (Soderstrom and Stoica 1989, sec. 5; Ljung 1999, ch. 13).
+% Note: 0.3 is only the PRBS lower excitation bound for data generation.
+% The production controller flow-floor factor is NOT this value; it is set
+% by best_tune.mat (tune.r_q_lo_factor ~= 0.57) and overrides this default.
 p.excite.r_q_lo_factor = 0.3;
 p.excite.r_q_hi_factor = 1.5;
 p.excite.r_q_dwells_s  = [1800 2700 4500 6300 9900];

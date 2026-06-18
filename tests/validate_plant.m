@@ -150,7 +150,7 @@ K = build_incidence(net);
 for k = 1:n_scen
     sc = S.scenarios(k);
     if ~isfield(sc, 'q_edges')
-        warning('T8: %s has no saved q_edges; re-run demo_ground_truth.m', sc.name);
+        warning('T8: %s has no saved q_edges; re-run demo_plant.m', sc.name);
         continue;
     end
     n_last = max(1, numel(sc.t)-2):numel(sc.t);   % last 3 samples

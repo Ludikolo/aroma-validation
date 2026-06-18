@@ -1,10 +1,11 @@
 % VALIDATE_PREDICTOR  Check the V_seq direct multi-step predictor
 %   against six invariants on the saved demo trajectories.
 %
-%   Run demo_predictor first (or rely on the precomputed demo.mat in
-%   predictor_open_loop/results) so the comparison is on disk. This
-%   script does not refit; it operates on the saved data + the
-%   committed fit artefacts and prints a per-block summary.
+%   Run demo_predictor first: this script reads its demo.mat and would
+%   otherwise silently check a stale cache, so it guards below that
+%   demo.mat is at least as new as the fits and errors if not. It does
+%   not refit; it operates on the saved data + the committed fit
+%   artefacts and prints a per-block summary.
 %
 %   T1  V_seq RMSE <= ZOH RMSE at every horizon (the predictor beats
 %       predict-current-value).
@@ -28,8 +29,24 @@ p = params();
 results_dir = fullfile(fileparts(fileparts(mfilename('fullpath'))), ...
                        'predictor_open_loop', 'results');
 
+% guard against a stale demo cache: demo.mat must be at least as new as the
+% fits it is derived from, otherwise the invariants below check old numbers
+demo_info = dir(fullfile(results_dir, 'demo.mat'));
+vseq_info = dir(fullfile(results_dir, 'vseq_fits_full.mat'));
+iter_info = dir(fullfile(results_dir, 'iterated_AB.mat'));
+assert(~isempty(demo_info) && demo_info.datenum >= max(vseq_info.datenum, iter_info.datenum), ...
+       'demo.mat is older than the fits; run demo_predictor first to refresh it');
+
 S = load(fullfile(results_dir, 'demo.mat'));
+% dict_block_ablation.mat is a frozen artifact: it records the dictionary-block
+% contributions to R^2 for the lift defined in candidate_library (the live
+% dictionary). demand-in-V and the operational weighting changed the fit, not the
+% lift, so the block structure it tests is unchanged and the theta-block result is
+% robust. guard that the artifact is present with the expected shape before T5.
 F = load(fullfile(results_dir, 'dict_block_ablation.mat'));
+assert(isfield(F, 'R2_buildup') && isfield(F, 'R2_loo') && isfield(F, 'loo_names') && ...
+       numel(F.loo_names) == 5 && isequal(F.horizons_report(:)', [1 6 16]), ...
+       'dict_block_ablation.mat missing or wrong shape (expected 5 LOO blocks, horizons [1 6 16])');
 
 fprintf('\n=== Predictor validation: six invariants ===\n');
 

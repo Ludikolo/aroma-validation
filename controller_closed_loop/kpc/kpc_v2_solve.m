@@ -1,5 +1,5 @@
 function [u_opt, info] = kpc_v2_solve(z_0, d_seq, u_prev, pred, p, net, tune)
-% KPC_V2_SOLVE  One MPC step of the v2 Koopman predictive controller.
+% KPC_V2_SOLVE  One MPC step of the Koopman predictive controller.
 %
 % Solves the spec's eq:kpc_problem_dynamic_flow as a single QP. The
 % inequalities c <= d, c >= 0, T_r <= T_s and the mixing law are
@@ -7,6 +7,22 @@ function [u_opt, info] = kpc_v2_solve(z_0, d_seq, u_prev, pred, p, net, tune)
 % them at every step). Kirchhoff conservation is imposed on the
 % reference r_q rather than on q itself; with q_0 conservative this
 % keeps q conservative for all k.
+%
+% THEORY index:
+%   line 100: prediction
+%   line 119: soft demand cap
+%   line 129: rate limits
+%   line 165: Tr <= Ts
+%   line 179: delivery reward
+%   line 194: slack prices
+%   line 248: energy term
+%   line 282: move suppression
+%   line 297: total cost
+%   line 329: adequacy floor, hard
+%   line 357: mixing, soft
+%   line 374: Kirchhoff, hard
+%   line 407: move blocking
+%   line 501: fallback
 
 Np      = pred.Np;
 n_user  = pred.n_user;
@@ -74,14 +90,15 @@ UB = [UB_U; UB_S; UB_S; UB_S; inf(n_mix_total,  1)];
 % inequalities: c <= d (soft, S_hi) and c >= 0 (soft, S_lo)
 % c = cp * theta with theta = F z_0 + G U (+ G_d D in d-in-V mode)
 % match THETA stacking: consumer-major (all horizons of C1, then C2, ...)
-D_vec = reshape(d_seq', [], 1);
+D_vec = reshape(d_seq', [], 1);   % stacked consumer-major to match the predictor
 
 % Effective free term: F z_0 plus the demand contribution from G_d D
 % when the predictor was fitted with demand inside V_seq. d_seq is
 % known at solve time (passed in by the caller), so G_d * D_vec folds
 % into the constant offset and the QP structure stays unchanged.
 has_d_in_V = isfield(pred, 'has_demand_in_V') && pred.has_demand_in_V;
-F_z0 = pred.F * z_0;
+% THEORY (prediction): c_pred = cp*(F*z0 + G*U) is affine in U, this keeps the whole problem convex
+F_z0 = pred.F * z_0;   % constant part of the prediction; U is the only unknown
 if has_d_in_V
     F_z0 = F_z0 + pred.G_d * D_vec;
 end
@@ -91,7 +108,7 @@ end
 % becomes c_pred + bias_correction. In c <= d this tightens the upper
 % bound by bias_correction per consumer. Stack consumer-major to match
 % D_vec and F_z0.
-if isfield(tune, 'bias_correction') && ~isempty(tune.bias_correction)
+if isfield(tune, 'bias_correction') && ~isempty(tune.bias_correction)   % off in production
     bias_corr = tune.bias_correction(:);
     assert(numel(bias_corr) == n_user, 'tune.bias_correction must be n_user x 1');
     bias_vec = reshape(repmat(bias_corr, 1, Np)', [], 1);
@@ -99,6 +116,7 @@ else
     bias_vec = zeros(n_S, 1);
 end
 
+% THEORY (soft demand cap): c <= d and c >= 0 carry slacks so the QP is always feasible; slack price = cost of violating
 A_cd_pos = sparse([ p.cp * pred.G,  -speye(n_S),       sparse(n_S, n_S), sparse(n_S, n_S), sparse(n_S, n_mix_total)]);
 A_cd_neg = sparse([-p.cp * pred.G,   sparse(n_S, n_S), -speye(n_S),      sparse(n_S, n_S), sparse(n_S, n_mix_total)]);
 A_ineq = [A_cd_pos; A_cd_neg];
@@ -108,6 +126,7 @@ b_ineq = [ D_vec - bias_vec - p.cp * F_z0;
 % rate constraints, |u_k - u_{k-1}| <= du_max
 [D_U, D_pre] = build_diff_op(Np, n_u);
 
+% THEORY (rate limits): actuator moves bounded per step, |du| <= du_max, hard
 du_max_step = [tune.dT_0s_max;
                tune.dr_q_max  * ones(n_edges, 1);
                tune.dT_ir_max * ones(n_user, 1)];
@@ -143,6 +162,7 @@ if use_Tr_Ts
         end
     end
     E_Tir = sparse(rows_E, cols_E, ones(n_Tr,1), n_Tr, n_U);
+    % THEORY (Tr <= Ts): return below supply, soft because T_s is read off the lift
     % T_ir - T_s_pred - s_Ts <= 0,  with x = [U; S_hi; S_lo; S_Ts; S_mix]
     A_Tr  = sparse([E_Tir - pred.G_Ts, ...
                     sparse(n_Tr, n_S), sparse(n_Tr, n_S), -speye(n_Tr), ...
@@ -156,6 +176,7 @@ if use_Tr_Ts
 end
 
 % cost
+% THEORY (delivery reward): minimizing -cp*sum(G*U) pushes predicted delivery up against the demand cap, no reference needed
 % tracking on U: -cp * 1^T (F z_0 + G U); constant drops out of argmin.
 % In ADMM mode (tune.admm_area_id set) only the rows of pred.G for the
 % local consumer enter the tracking gradient. Other consumers' tracking
@@ -166,10 +187,11 @@ if admm_active
     G_area_rows = (a_id - 1) * Np + (1:Np);
     f_track_U = -p.cp * (sum(pred.G(G_area_rows, :), 1)');
 else
-    f_track_U = -p.cp * (sum(pred.G, 1)');
+    f_track_U = -p.cp * (sum(pred.G, 1)');   % maximise delivery = minimise its negative; constant d drops out
 end
 % Slacks live consumer-major; in ADMM mode keep only the local consumer's
 % penalties non-zero so the sum across areas reproduces the central cost.
+% THEORY (slack prices): rho_slack prices the violations; the negative side costs 10x by default
 f_slack_hi = tune.rho_slack * ones(n_S, 1);
 if admm_active
     area_mask = zeros(n_S, 1);
@@ -223,6 +245,7 @@ end
 use_energy = isfield(tune, 'alpha_energy') && tune.alpha_energy > 0 ...
              && isfield(pred, 'has_extras') && pred.has_extras;
 if use_energy
+    % THEORY (energy term): source power alpha*(T0s - T0r)*Q_net is bilinear (cp folded into alpha_energy), linearised around the current point, stays linear in U
     alpha_E  = tune.alpha_energy;
     T0s_nom  = u_prev(1);
     T0r_nom  = z_0(pred.meta.idx.T_0r);
@@ -256,6 +279,7 @@ W_full = kron(eye(Np), W);
 D_U_s   = sparse(D_U);
 D_pre_s = sparse(D_pre);
 W_full_s = sparse(W_full);
+% THEORY (move suppression): quadratic penalty on du smooths the inputs, the only quadratic term in the cost
 H_du_UU = 2 * (D_U_s' * W_full_s * D_U_s);             % n_U x n_U sparse
 f_du_U  = 2 * (D_U_s' * W_full_s * D_pre_s * u_prev);
 % Rate-cost is a shared U-only term (acts on every agent identically).
@@ -268,6 +292,9 @@ end
 
 % slacks enter the cost linearly only; tiny diagonal regulariser on H
 H = blkdiag(H_du_UU, sparse(3 * n_S + n_mix_total, 3 * n_S + n_mix_total)) + 1e-9 * speye(n_total);
+
+
+% THEORY (total cost): [delivery reward + energy + move; slack prices], linear plus small quadratic = QP
 f = [f_track_U + f_du_U + f_energy; f_slack_hi; f_slack_lo; f_slack_Ts; f_slack_mix];
 
 % ADMM consensus penalty on U only (opt-in, no-op when absent)
@@ -299,6 +326,7 @@ if isfield(tune, 'dT_floor') && ~isempty(tune.dT_floor)
     dT_floor = tune.dT_floor;
 end
 assert(dT_floor > 0, 'kpc_v2_solve: dT_floor = Tin_nom - T_r_min must be > 0');
+% THEORY (adequacy floor, hard): r_q >= safety*d/(cp*dT) so the planned flow can always physically carry the demand
 adequacy_safety = 1.2;
 if isfield(tune, 'adequacy_safety') && ~isempty(tune.adequacy_safety)
     adequacy_safety = tune.adequacy_safety;
@@ -326,6 +354,7 @@ A_ineq = [A_ineq; A_dmin];
 b_ineq = [b_ineq; b_dmin];
 
 % mixing law as soft equality (spec tilde g_N(z) = 0)
+% THEORY (mixing, soft): junction mixing residual bounded by slack; a hard equality would fight model mismatch
 % V_seq predicts the per-junction residual; impose |residual| <= S_mix
 % with high penalty on S_mix. Hard equality conflicts with the plant's
 % first-order flow non-conservation during transients.
@@ -342,6 +371,7 @@ if has_mix
     b_ineq = [b_ineq; b_mix_pos; b_mix_neg];
 end
 
+% THEORY (Kirchhoff, hard): mass conservation on r_q at every junction, every horizon step
 % Kirchhoff equality on r_q
 % Imposed on the input rather than on q. With q_0 conservative and
 % r_q conservative every step, q stays conservative for all k.
@@ -374,6 +404,7 @@ else
     beq = [];
 end
 
+% THEORY (move blocking): inputs free for Nc steps then held, Nc = 1 in the tune, shrinks the QP
 % move blocking: tune.Nc < Np freezes u_h = u_{Nc-1} for h >= Nc
 % Standard MPC technique (Cagienard & Morari 2007; Maciejowski 2002
 % §3.4). Reduces decision freedom: Nc free decisions u_0..u_{Nc-1},
@@ -412,7 +443,7 @@ end
 
 % solve
 % Defaults are the production-locked values. Each is overridable via
-% the tune struct so sensitivity-tests (Bucket A4 / A6) can sweep them
+% the tune struct so sensitivity tests can sweep them
 % without touching the production path.
 qp_algo  = 'interior-point-convex';
 qp_opt_tol = 1e-9;
@@ -467,6 +498,7 @@ tic;
 [x_opt, fval, exitflag, output] = quadprog(H, f, A_ineq, b_ineq, Aeq, beq, LB, UB, x0, qp_opts);
 solve_ms = toc * 1000;
 
+% THEORY (fallback): on solver failure hold the previous plan instead of applying an invalid solution
 if exitflag <= 0
     % Solver failure: hold the warm-start (repeated u_prev). The 50-test
     % regression has never seen this branch fire; if it does in deployment
@@ -479,6 +511,7 @@ if any(~isfinite(x_opt(1:n_U)))
     error('kpc_v2_solve: non-finite values in U after solve');
 end
 
+% apply the optimal inputs
 U_opt    = x_opt(1:n_U);
 S_hi_opt = x_opt(n_U +     (1:n_S));
 S_lo_opt = x_opt(n_U + 1*n_S + (1:n_S));
@@ -489,7 +522,7 @@ else
     S_mix_opt = [];
 end
 
-u_opt = U_opt(1:n_u);
+u_opt = U_opt(1:n_u); 
 info.U_seq      = reshape(U_opt,    n_u,    Np);
 % Consumer-major stacking: S_*_opt((i-1)*Np + h) is consumer i, horizon h.
 % reshape(., Np, n_user).' makes info.*_seq(i, h) = consumer i at horizon h.

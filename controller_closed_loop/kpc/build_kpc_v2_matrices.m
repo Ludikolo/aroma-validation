@@ -13,6 +13,10 @@ function pred = build_kpc_v2_matrices(fits)
 %              compute c_pred(U, d_seq) = cp*(F z + G U + G_d D).
 %
 % Stacking is consumer-major: all Np horizons of C1, then C2, ...
+%
+% THEORY index:
+%   line 38: F
+%   line 41: G
 
 n_user = size(fits.cp, 2);
 Np     = numel(fits.horizons);
@@ -31,8 +35,10 @@ for i = 1:n_user
         h   = fits.horizons(hi);
         row = (i - 1) * Np + hi;
 
+        % THEORY (F): row (i,h) = the state weights cp of that cell, acts on z0
         F(row, :) = fits.cp{hi, i}';
 
+        % THEORY (G): row (i,h) = the input weights dp, only the first h inputs filled, block lower triangular
         dh = fits.dp{hi, i};
         if has_d
             expected = (n_u + n_user) * h;

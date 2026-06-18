@@ -1,8 +1,11 @@
-% GENERATE_DATA_V2  Generate v2 train/val/test trajectories at the
-% current Ts in params.m. Saves to results/ for the
-% Ts=900 migration headline (T2 of TS900_MIGRATION_PLAN); the frozen
-% Ts=60 baseline data lives in results/ and is not touched.
-% Sizing comes from p.data.* in params.m.
+% GENERATE_DATA  Generate the PRBS train/val/test trajectories used to fit
+% and evaluate the predictor. Each trajectory is a 24 h PRBS-excited run on
+% the AROMA plant at the sample time Ts set in params.m. The set sizes
+% (n_train / n_val / n_test) and trajectory duration come from p.data.* in
+% params.m. Trajectories are saved as individual .mat files in results/.
+%
+% THEORY index:
+%   line 31: data split
 
 clear; clc;
 startup;
@@ -19,12 +22,13 @@ outdir = fullfile(fileparts(mfilename('fullpath')), '..', 'results');
 if ~exist(outdir, 'dir'), mkdir(outdir); end
 
 T_sim     = p.data.traj_dur_s;
-seed_base = 1000;       % keep v1 (uses 100s) and v2 seed spaces clearly apart
+seed_base = 1000;       % keep this seed space well apart from the 100s-based one
 
 % Spread t_offsets evenly across 24 h so the predictor sees every
 % demand regime (morning ramp, midday peak, evening peak, night).
 % Deterministic per-index for reproducibility.
 T_day = 24 * 3600;
+% THEORY (data split): 20 train / 2 val / 3 test, staggered day offsets so the demand phase differs per trajectory
 offsets_train = mod((0:p.data.n_train-1) * T_day / p.data.n_train, T_day);
 offsets_val   = mod((0:p.data.n_val-1)   * T_day / p.data.n_val   + 0.5*T_day/p.data.n_train, T_day);
 offsets_test  = mod((0:p.data.n_test-1)  * T_day / p.data.n_test  + 0.7*T_day/p.data.n_train, T_day);

@@ -1,5 +1,5 @@
 function [Z, names, meta] = candidate_library(traj, p)
-% CANDIDATE_LIBRARY_V2  Lifting psi(xi) for the v2 reformulation.
+% CANDIDATE_LIBRARY  Lifting psi(xi) for the Koopman predictor.
 %
 % Three feature blocks plus a constant:
 %   A thermal    T_0s, T_F0, T_s^i (5), T_r^i (5), T_0r           13
@@ -9,6 +9,12 @@ function [Z, names, meta] = candidate_library(traj, p)
 %
 % Including theta^i in the lift is what makes c^i = cp theta^i
 % linear in z, which is the trick that lets the QP run.
+%
+% THEORY index:
+%   line 59: theta
+%   line 71: delay embedding
+%   line 100: delayed bilinear
+%   line 182: exergy block
 
 n_user = size(traj.q_users, 1);
 N      = numel(traj.t);
@@ -50,6 +56,7 @@ end
 feats{end+1} = sum(traj.q_users, 1);     nm{end+1} = 'Q_net';
 idx.Q_net = numel(feats);
 
+% THEORY (theta): theta = (Ts - Tr)*q per consumer; c = cp*theta is a linear read-out of z, key for the convex QP
 % Block C: theta (5)
 idx.theta = zeros(1, n_user);
 for i = 1:n_user
@@ -61,8 +68,9 @@ end
 feats{end+1} = ones(1, N);               nm{end+1} = 'one';
 idx.one = numel(feats);
 
+% THEORY (delay embedding): transport delay source to consumer is 17-50 samples, long horizons need past T_F0 (Takens)
 % optional delay block (Takens-style upstream embedding)
-% Carries v1's source-delay-embedding insight into v2. The transport
+% Carries the source-delay-embedding insight. The transport
 % delay F_0 -> consumer is 17-50 samples depending on flow, so without
 % past T_F0 the linear lift cannot reproduce theta^i at long horizons.
 max_lag = 0;
@@ -89,6 +97,7 @@ if isfield(p, 'o2') && isfield(p.o2, 'use_delays') && p.o2.use_delays
         end
     end
 
+    % THEORY (delayed bilinear): T_F0(t-l)*q couples what was injected upstream with how fast it travels
     % delayed bilinear T_F0(t-d) * q^i(t): what was injected at the
     % source d steps ago, modulated by current user-side flow.
     if isfield(p.o2, 'use_delayed_bilinear') && p.o2.use_delayed_bilinear
@@ -164,12 +173,13 @@ if use_extras
 end
 
 % optional exergy block (gated for exergy production)
-% 12 bilinears appended AFTER the canonical-37 lift so rows 38..49 match
-% v_exergy in make_ol_builder.m byte-for-byte (same order, Tamb=p.Text):
+% 12 bilinears appended AFTER the base 37-feature lift, filling rows 38..49
+% in this fixed order (Tamb = p.Text):
 %   q^i*(T_s^i - Tamb) (5), q^i*(T_r^i - Tamb) (5),
 %   Q_net*(T_0s - Tamb) (1), Q_net*(T_0r - Tamb) (1).
-% OFF by default -> canonical-37 bit-exact. Enabled only when exergy is the
+% OFF by default -> base 37-feature lift. Enabled only when exergy is the
 % adopted production lift.
+% THEORY (exergy block): bilinears q*(T - Tamb) on top of the base 37, gives the production lift n_z = 49
 use_exergy = isfield(p, 'o2') && isfield(p.o2, 'use_exergy') && p.o2.use_exergy;
 if use_exergy
     T_amb = p.Text;

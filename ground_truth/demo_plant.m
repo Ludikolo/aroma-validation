@@ -21,7 +21,7 @@
 %     - source return T^(0,r) and the full pipe-cell temperature field
 %
 %   The simulator integrates 1D pipe transport on dx = 10 m cells in
-%   continuous time via ode15s, runs first-order flow dynamics on
+%   continuous time via ode45, runs first-order flow dynamics on
 %   each edge, models the source as a CSTR (perfectly mixed control
 %   volume), and lets the substation enforce c <= d and T_r >= T_r_min
 %   by clipping.

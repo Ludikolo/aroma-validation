@@ -34,13 +34,13 @@ breaks the floor.
 
 | Equation                                                                | File                                                                                                  |
 |-------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------|
-| q_{k+1} = a q_k + (1-a) r_q,k,  a = exp(-Ts / eps)                       | shared/plant/flow_dynamics.m   ;  shared/plant/simulate_plant.m line 170                              |
+| q_{k+1} = a q_k + (1-a) r_q,k,  a = exp(-Ts / eps)                       | shared/plant/flow_dynamics.m   ;  shared/plant/simulate_plant.m line 177                              |
 | c = c_p (T_s - T_r) q   (mass-flow form)                                 | shared/network/physics/components/prosumer_house.m lines 21-26                                        |
 | substation contracts: c <= d, T_r >= T_r_min, c >= 0, T_r <= T_s         | same file, by construction of clipping                                                                 |
 | A_s q^(s,e) = [Q_net; -q^(i)],  A_r q^(r,e) = [-Q_net; q^(i)]            | shared/plant/simulate_plant.m (flow propagation),  shared/network/build_incidence.m (matrices)        |
-| sum_in T_in q_in = T_node sum_out q_out  per junction                    | shared/network/physics/rhs_network.m lines 92-96                                                       |
-| 1D pipe transport with first-order ambient loss                          | shared/network/physics/rhs_network.m  (f_DHC ODE called by ode15s in simulate_plant.m)                 |
-| source CSTR: T_int = (1 - theta_1) T_in + theta_1 T_out, theta_1 = 0.7   | shared/network/physics/rhs_network.m lines 92-96 ;  shared/network/physics/measure_node_outlets.m 67-69 |
+| sum_in T_in q_in = T_node sum_out q_out  per junction                    | shared/network/physics/rhs_network.m lines 45-74                                                       |
+| 1D pipe transport with first-order ambient loss                          | shared/network/physics/rhs_network.m lines 134-160 (f_DHC ODE called by ode45 in simulate_plant.m)     |
+| source CSTR: T_int = (1 - theta_1) T_in + theta_1 T_out, theta_1 = 0.7   | shared/network/physics/rhs_network.m lines 99-102 ;  shared/network/physics/measure_node_outlets.m 67-69 |
 
 ## Substation floor: how it stays >= T_r_min under demand spikes
 

@@ -4,11 +4,15 @@ function Fq = flow_dynamics(net, p)
 %   a^(*) = exp(-Ts / eps^(*))
 %
 % Three groups: supply edges, return edges, user-side stubs.
+%
+% THEORY index:
+%   line 15: flow dynamics
 
 ei = edge_user_index(net);
 n_edges = numel(net.Edges);
 
 a = zeros(n_edges, 1);
+% THEORY (flow dynamics): flows track setpoints first order, q+ = a*q + (1-a)*r_q; this is why flows are states
 a(ei.Es) = exp(-p.Ts / p.flow_dyn.epsilon_supply);
 a(ei.Er) = exp(-p.Ts / p.flow_dyn.epsilon_return);
 

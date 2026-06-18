@@ -1,11 +1,11 @@
 function res = kpc_step_loop(net, res_wu, p, scenario_start, T_warm, T_sim, ...
                               pred, tune, ei, F0_idx, R0_idx, con_idx, lift_fn)
 % Optional 13th arg `lift_fn` is a function handle (traj, p) -> [Z, info, meta]
-% used to produce the lifted state. Defaults to canonical_library_v2.
+% used to produce the lifted state. Defaults to candidate_library.
 if nargin < 13 || isempty(lift_fn)
     lift_fn = @(t, pp) candidate_library(t, pp);
 end
-% KPC_STEP_LOOP  Run the v2 KPC controller in closed loop for T_sim
+% KPC_STEP_LOOP  Run the KPC controller in closed loop for T_sim
 % seconds. Each step builds the lifted state z, solves the KPC QP, applies
 % the first input to the plant for one Ts (via simulate_plant), and appends
 % the result to a rolling trajectory. The returned res holds the per-step
@@ -73,7 +73,7 @@ for k = 1:N_cl
     % (tune.noise_cfg present => add zero-mean Gaussian noise to the
     % temperature/flow channels before building z_0, while the plant
     % continues to integrate the true state). Standard imperfect-
-    % observation MPC formulation; used by T9.2 noise-sensitivity.
+    % observation MPC formulation, used for the sensor-noise robustness test.
     if isfield(tune, 'noise_cfg') && ~isempty(tune.noise_cfg)
         nc = tune.noise_cfg;
         rs = RandStream('mt19937ar', 'Seed', nc.seed + cur_idx);
@@ -86,10 +86,12 @@ for k = 1:N_cl
         traj_to_now.T_ir    = traj_to_now.T_ir    + sT * randn(rs, size(traj_to_now.T_ir));
         traj_to_now.q_users = traj_to_now.q_users .* (1 + sQ * randn(rs, size(traj_to_now.q_users)));
     end
+    % THEORY (state): lift the measured history to z0; the delay features need past samples (warmup provides them)
     [Z_hist, ~, ~] = lift_fn(traj_to_now, p);
     z_0 = Z_hist(:, end);
 
     t_now = traj.t(cur_idx);
+    % THEORY (forecast): demand over the horizon from the demand model; perfect in nominal, errors tested separately
     d_seq = zeros(n_user, Np);
     for h = 1:Np
         for i = 1:n_user
@@ -98,14 +100,14 @@ for k = 1:N_cl
         end
     end
 
-    % Optional multiplicative demand-forecast noise (T9e). Plant
+    % Optional multiplicative demand-forecast noise, for robustness tests. Plant
     % continues to integrate the true profile; only the controller
     % sees a perturbed d_seq. Clipped to >= 0 so a heavy negative
     % draw cannot make demand negative.
     if isfield(tune, 'demand_noise_cfg') && ~isempty(tune.demand_noise_cfg)
         dn = tune.demand_noise_cfg;
         rs_d = RandStream('mt19937ar', 'Seed', dn.seed + cur_idx);
-        % Default: legacy Gaussian multiplicative noise.
+        % Default: Gaussian multiplicative noise.
         type = 'gaussian';
         if isfield(dn, 'type') && ~isempty(dn.type)
             type = lower(dn.type);
@@ -150,6 +152,7 @@ for k = 1:N_cl
     solve_ms(k) = info.solve_ms;
     exitflag(k) = info.exitflag;
 
+    % THEORY (receding horizon): apply only the first input, plant moves one Ts, re-measure and re-solve = feedback
     T_0s_apply = u_opt(1);
     r_q_apply  = u_opt(2:1+n_edges);
     p_step = p;
