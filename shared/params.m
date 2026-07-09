@@ -93,21 +93,25 @@ p.o1.op_weight = 8;
 
 % Dictionary configuration.
 %   delay_lags         lag indices for the source-temperature embedding
-%                      (Takens 1981): keep short at Ts = 900 since one
-%                      pipe transit fits in 1-3 samples.
+%                      (Takens 1981): kept short ([1,2]) on the closed-loop
+%                      ablation. The source->consumer dead-time is ~3-5 samples
+%                      at nominal flow (longer at low flow); two lags seed the
+%                      recent input history and the rolled dynamics propagate
+%                      the rest, so more lags add no closed-loop gain.
 %   use_delayed_bilinear adds T_F0(k-d) * q^(i) features (best block).
 %   use_substation_extras gates the saturation / regime / diurnal trig
 %                      block. Off by default: it improves h = 1 R^2 but
 %                      worsens long-horizon V_seq under the same data.
-% THEORY (dictionary flags): on/off switches for lift blocks; delays + bilinears + exergy on gives n_z = 49
+% THEORY (dictionary flags): on/off switches for lift blocks; delays + bilinears + exergy on gives n_z = 47
 p.o2.use_delays            = true;
 p.o2.use_flow_disc         = false;
 p.o2.use_delayed_bilinear  = true;
 p.o2.delay_lags            = [1, 2];
 p.o2.use_substation_extras = false;
-% Exergy block: 12 bilinears q*(T_s-Tamb), q*(T_r-Tamb), Qnet*(T0s-Tamb),
-% Qnet*(T0r-Tamb) appended to the base lift, giving n_z = 49. This is the
-% production lift; the controller tune below is fitted on it.
+% Exergy block: 11 bilinears q*(T_s-Tamb), q*(T_r-Tamb), Qnet*(T0r-Tamb)
+% appended to the base lift, giving n_z = 47 (a state-only lift; the source
+% command T_0s is an input, so it enters through B[u;d], not the dictionary).
+% This is the production lift; the controller tune below is fitted on it.
 p.o2.use_exergy            = true;
 
 %% Data set (PRBS-excited trajectories used to fit the predictor)
@@ -122,8 +126,9 @@ p.data.rng_seed   = 42;
 
 %% Excitation (PRBS on r_q + dT_c)
 % Dwell times are pairwise coprime ([2 3 5 7 11] * Ts at Ts = 900) so
-% cycled PRBS across edges does not phase-lock at long horizons
-% (Soderstrom and Stoica 1989, sec. 5; Ljung 1999, ch. 13).
+% cycled PRBS across edges does not phase-lock at long horizons. Coprime
+% dwell spacing is a practitioner heuristic for decorrelating multi-channel
+% PRBS; for PRBS / input experiment design in general see Ljung 1999, ch. 14.
 % Note: 0.3 is only the PRBS lower excitation bound for data generation.
 % The production controller flow-floor factor is NOT this value; it is set
 % by best_tune.mat (tune.r_q_lo_factor ~= 0.57) and overrides this default.

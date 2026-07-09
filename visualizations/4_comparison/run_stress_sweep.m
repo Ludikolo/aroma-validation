@@ -1,8 +1,10 @@
 % RUN_STRESS_SWEEP  Run the two fast Koopman controllers (KPC direct multi-step
-% vs the iterated one-step Koopman-LMPC) at progressively harder flow capacity
-% and save the worst-consumer demand-met. As the bind tightens the gap opens up:
-% KPC stays above the comfort bar while the iterated model drops below it. That
-% is why the head-to-head is run at a hard point. Render with viz_stress_sweep.
+% vs the iterated one-step Koopman-LMPC) across a flow-capacity sweep and save
+% the worst-consumer demand-met. When capacity binds (tight flow) both are
+% flow-limited and tie at the ceiling; once flow has headroom comfort is set by
+% prediction quality, and the direct multi-step predictor holds full comfort
+% while the iterated one-step rollout's compounding error leaves demand unmet.
+% Render with viz_stress_sweep.
 
 clear; clc;
 here = fileparts(mfilename('fullpath'));
@@ -27,7 +29,7 @@ if isfield(S, 'fit_iter'), fit_iter = S.fit_iter; else, fit_iter = S; end
 tune_lmpc = tune; tune_lmpc.use_mixing = false;
 
 T_warm = 30*60; T_sim = 24*3600; sc = 0;
-mdots = [0.50 0.45 0.40 0.35 0.30];
+mdots = [0.35 0.50 0.65 0.80 1.00];
 met_kpc  = zeros(size(mdots));
 met_lmpc = zeros(size(mdots));
 fprintf('\n mdot |  KPC worst |  iterated worst |  gap\n');

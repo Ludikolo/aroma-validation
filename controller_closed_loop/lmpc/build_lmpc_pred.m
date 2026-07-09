@@ -25,17 +25,12 @@ function pred = build_lmpc_pred(fit_iter, Np, z_0, u_prev, p, n_edges, n_user, d
 % into its offset terms. The decision vector stays 35*Np wide, identical
 % to KPC.
 %
-% Bilinear delivered heat. The plant rule is c = cp (T_s - T_ir) q, which
-% is bilinear in (T_s, T_ir, q). We linearise it around the previous-step
-% operating point (T_s_0, T_ir_0, q_0):
-%
-%     c_lin/cp = (T_s_0 - T_ir_0) q + q_0 (T_s - T_ir) - q_0 (T_s_0 - T_ir_0)
-%
-% with T_s and q read off z_h and T_ir read off u_h. This is the standard
-% tangent-linearisation MPC: the controller never sees the bilinear
-% product, only its first-order approximation around the last step. That
-% is the whole point of this baseline; everything downstream is shared
-% with KPC.
+% Delivered heat. theta = (T_s - T_r) q is itself a coordinate of the lift,
+% so delivered heat c^(i)_h / cp = theta^(i)_h is read straight off the rolled
+% state z_h, with no tangent-linearisation. This matches how KPC and the
+% open-loop leg form delivered heat, so the ONLY difference from KPC is the
+% direct-vs-iterated prediction (a clean single-variable swap). T_ir enters
+% delivered heat through the rollout (B_ctrl), not an explicit output term.
 %
 % Inputs
 %   fit_iter : struct with A (n_z x n_z), B (n_z x 40), meta.idx (T_is,
@@ -51,9 +46,10 @@ function pred = build_lmpc_pred(fit_iter, Np, z_0, u_prev, p, n_edges, n_user, d
 %              the step producing z_h. Known at solve time.
 %
 % Output pred: same fields lmpc_solve and kpc_v2_solve consume.
-%   pred.F, pred.G   : c_lin/cp coefficients per (consumer, horizon)
-%   pred.b           : per-(consumer, horizon) constant offset, includes
-%                      the demand roll-out contribution to c_lin
+%   pred.F, pred.G   : theta (= c/cp) coefficients per (consumer, horizon),
+%                      read off the rolled lifted state (no linearisation)
+%   pred.b           : per-(consumer, horizon) constant offset, the demand
+%                      roll-out contribution to theta
 %   pred.F_Ts,pred.G_Ts, pred.Ts_off : T_s prediction (linear in z) plus
 %                      its demand-driven offset, used by T_r <= T_s
 %   pred.F_q, pred.G_q, pred.F_T0r, pred.G_T0r : q and T_0r predictions
@@ -132,42 +128,26 @@ T_0s_0  = u_prev(1);                            % scalar
 % T_ir_0 lives in u_prev at positions 1 + n_edges + (1:n_user)
 T_ir_0  = u_prev(1 + n_edges + (1:n_user));
 
-%% Per-(consumer, horizon) c_lin/cp coefficients
-% c_lin^(i)_h / cp = q_0(i) T_s^(i)_h + (T_s_0(i)-T_ir_0(i)) q^(i)_h
-%                    - q_0(i) T_ir^(i)_h - q_0(i)(T_s_0(i)-T_ir_0(i))
-% with T_s^(i)_h, q^(i)_h read off z_h and T_ir^(i)_h read off u_h.
-% z_h = F_z[h] z_0 + G_z[h] U + zdem_h, so the demand piece zdem_h enters
-% the per-consumer offset b(row).
+%% Per-(consumer, horizon) delivered-heat coefficients: theta read off z
+% Delivered heat is theta = (T_s - T_r) q, itself a coordinate of the lift, so
+% c^(i)_h/cp = theta^(i)_h is read straight off the rolled state
+% z_h = F_z[h] z_0 + G_z[h] U + zdem_h. That is affine in U via G_z, with no
+% tangent-linearisation -- exactly how KPC and the open-loop leg form delivered
+% heat, so the only difference from KPC is the direct-vs-iterated prediction.
+% T_ir enters delivered heat through the rollout (B_ctrl), not an explicit term.
 n_S = n_user * Np;
 F = zeros(n_S, n_z);
 G = zeros(n_S, Np * n_u);
 b = zeros(n_S, 1);
 
 for i = 1:n_user
-    a_Ts = q_0(i);
-    a_Tr = -q_0(i);
-    a_q  = T_s_0(i) - T_ir_0(i);
-    b_i  = -q_0(i) * (T_s_0(i) - T_ir_0(i));
-
-    % row selectors: pull T_s^(i), q^(i) out of z
-    e_Ts = zeros(1, n_z); e_Ts(idx.T_is(i)) = 1;
-    e_q  = zeros(1, n_z); e_q (idx.q(i))    = 1;
-
+    e_th = zeros(1, n_z); e_th(idx.theta(i)) = 1;   % select theta^(i) out of z
     for h = 1:Np
         row  = (i-1)*Np + h;
         zrow = (h-1)*n_z + (1:n_z);
-        Fz_h = F_z(zrow, :);
-        Gz_h = G_z(zrow, :);
-        zdem_h = Zdem(zrow);
-
-        % c_lin/cp linear in z_h via a_Ts T_s + a_q q
-        F(row, :) = a_Ts * (e_Ts * Fz_h) + a_q * (e_q * Fz_h);
-        G(row, :) = a_Ts * (e_Ts * Gz_h) + a_q * (e_q * Gz_h);
-        % linear in u_h via T_ir^(i)_h coefficient a_Tr
-        u_h_offset = (h-1)*n_u + 1 + n_edges + i;
-        G(row, u_h_offset) = G(row, u_h_offset) + a_Tr;
-        % constant: op-point term + demand roll-out folded into T_s and q
-        b(row) = b_i + a_Ts * (e_Ts * zdem_h) + a_q * (e_q * zdem_h);
+        F(row, :) = e_th * F_z(zrow, :);
+        G(row, :) = e_th * G_z(zrow, :);
+        b(row)    = e_th * Zdem(zrow);
     end
 end
 

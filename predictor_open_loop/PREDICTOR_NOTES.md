@@ -11,8 +11,8 @@ V_k^(h) = [u_k; ...; u_{k+h-1};  d_{k+1}; ...; d_{k+h}]
 The substation heat extraction `c^(i)` is exactly proportional to the
 bilinear `theta^(i) = (T_s - T_r) * q`, so a predictor for `theta`
 predicts `c`. The lifted state `z_k = psi(xi_k)` is a fixed vector of
-49 functions of the augmented plant state (the base 37-feature lift
-plus a 12-feature exergy block). `V_k^(h)` stacks the applied control
+47 functions of the augmented plant state (the base 36-feature lift
+plus a 11-feature exergy block). `V_k^(h)` stacks the applied control
 inputs `u = [T^(0,s); r_q; T^(i,r)]` and the demand forecast `d` over
 the prediction horizon h. The demand is measured/forecast at each
 substation, so it enters as a known input rather than something to
@@ -21,20 +21,20 @@ predict.
 One linear fit per (consumer, horizon) pair gives V_seq the direct
 multi-step structure. No recursion, no one-step error accumulation.
 
-## Dictionary (49 features)
+## Dictionary (47 features)
 
-The base lift is 37 features in five blocks; the production lift adds a
-12-feature exergy block on top, giving `n_z = 49`.
+The base lift is 36 features in five blocks; the production lift adds a
+11-feature exergy block on top, giving `n_z = 47`.
 
 | block | symbol             | count | what it captures                                        |
 |-------|--------------------|-------|---------------------------------------------------------|
-| A     | thermal            | 13    | T^(0,s), T_{F0}, T^(i,s), T^(i,r), T^(0,r)              |
+| A     | thermal            | 12    | T_{F0}, T^(i,s), T^(i,r), T^(0,r)                       |
 | B     | hydraulic          | 6     | q^(i), Q_net                                            |
 | C     | **theta**          | 5     | theta^(i) = (T^(i,s) - T^(i,r)) * q^(i)                 |
 | const | const              | 1     | intercept                                               |
 | E     | source lag         | 2     | T_{F0}(k-1), T_{F0}(k-2)                                |
 | F     | delayed bilinear   | 10    | T_{F0}(k-d) * q^(i),  d in {1, 2}                       |
-| G     | **exergy**         | 12    | q^(i)*(T^(i,s)-T_amb), q^(i)*(T^(i,r)-T_amb), Q_net*(T^(0,s)-T_amb), Q_net*(T^(0,r)-T_amb) |
+| G     | **exergy**         | 11    | q^(i)*(T^(i,s)-T_amb), q^(i)*(T^(i,r)-T_amb), Q_net*(T^(0,r)-T_amb) |
 
 Dropping the theta block from the base lift costs about 0.21 in R^2 at
 h = 1 (over 20 x more than dropping any other single block): the
@@ -61,7 +61,7 @@ versus rolled-out one-step.
 V_seq uses split-ridge regularisation: separate lambda for the
 state-coefficient block c and the input-coefficient block d, picked
 on the validation set per (h, i). Inputs scale 40 * h coefficients
-(35 controls + 5 demand, per step) versus 49 state coefficients, so one
+(35 controls + 5 demand, per step) versus 47 state coefficients, so one
 lambda is the wrong knob.
 
 ## Checks (validate_predictor.m)
@@ -69,7 +69,7 @@ lambda is the wrong knob.
 | #  | Invariant                                                              | Result on the demo set    |
 |----|-------------------------------------------------------------------------|---------------------------|
 | 1  | V_seq RMSE <= ZOH RMSE at every horizon                                 | true, h = 1..16           |
-| 2  | V_seq RMSE < iterated A,B RMSE at h = 16                                | 12.0 % lower, suite mean  |
+| 2  | V_seq RMSE < iterated A,B RMSE at h = 16                                | 12.1 % lower, suite mean  |
 | 3  | V_seq 1-step suite R^2 >= 0.7                                           | 0.712                     |
 | 4  | Worst-consumer NRMSE at h = 1 <= 30 % of peak demand                    | 19.2 %                    |
 | 5  | Theta-block contribution to R^2 at h = 1 >= 0.10                        | 0.207                     |
@@ -86,7 +86,7 @@ two are equal, as expected for a one-step forecast.
 
 | Equation                                                                       | File                                                       |
 |--------------------------------------------------------------------------------|------------------------------------------------------------|
-| psi(xi) = 49 features (base 37 + 12 exergy bilinears)                          | predictor_open_loop/koopman/candidate_library.m            |
+| psi(xi) = 47 features (base 36 + 11 exergy bilinears)                          | predictor_open_loop/koopman/candidate_library.m            |
 | theta_{k+h}^(i) = c_{h,i}' z_k + d_{h,i}' V_k^(h), per (h, i), split-ridge     | predictor_open_loop/koopman/fit_vseq.m                     |
 | z_{k+1} = A z_k + B [u_k; d_{k+1}] (demand-aware, stable iterated baseline)    | predictor_open_loop/koopman/fit_iterated.m                 |
 | Per-junction mixing residual g_N(z) used as a soft constraint downstream       | predictor_open_loop/koopman/build_mixing.m                 |
@@ -112,5 +112,6 @@ test R^2 (T3) is the guard that it does not over-specialise.
 
 PRBS dwell times use pairwise-coprime prime multipliers
 (`[2, 3, 5, 7, 11] * Ts`) so the cycled excitation across edges does
-not phase-lock at long horizons (Soderstrom and Stoica 1989 sec. 5;
-Ljung 1999 ch. 13).
+not phase-lock at long horizons. Coprime dwell spacing is a practitioner
+heuristic for decorrelating multi-channel PRBS; for PRBS / input
+experiment design in general see Ljung 1999 ch. 14.

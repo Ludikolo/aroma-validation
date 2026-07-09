@@ -73,12 +73,17 @@ cfg.user     = ei.user;
 cfg.rqhi_usr = p.excite.r_q_hi_factor * cfg.md(ei.user);
 cfg.adeq     = tune.adequacy_safety;
 cfg.dT_floor = p.Tin_nom - p.consumer.T_r_min;
-% NMPC budget kept generous so it converges (the speedup claim must be real)
+% NMPC runs to convergence: the budget is large enough that fmincon stops on its
+% optimality tolerance, not on the iteration cap, so the solve-time and feasibility
+% it reports are genuine (no artificial cap distorting the comparison).
 cfg.fopts = optimoptions('fmincon', 'Algorithm', 'sqp', 'Display', 'off', ...
-                         'MaxFunctionEvaluations', 600, 'MaxIterations', 100, ...
+                         'MaxFunctionEvaluations', 3000, 'MaxIterations', 300, ...
                          'FiniteDifferenceStepSize', 0.05, ...   % large enough to see the delayed delivery response, like the LMPC FD step (a tiny default step gives noisy gradients on this plant)
                          'OptimalityTolerance', 1e-6, 'StepTolerance', 1e-8);
-cfg.qopts = optimoptions('quadprog', 'Display', 'off');
+% same QP tolerance as KPC so the two QP-based controllers are solved alike
+cfg.qopts = optimoptions('quadprog', 'Display', 'off', ...
+                         'OptimalityTolerance', 1e-9, 'ConstraintTolerance', 1e-9, ...
+                         'StepTolerance', 1e-12, 'MaxIterations', 200);
 
 % --- run all four on the same window ---
 fprintf('Running KPC ...\n'); t0 = tic;

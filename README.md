@@ -40,7 +40,7 @@ deployment). Regenerating the comparison and the sweep is expensive
 hours); their saved `.mat` ship with the repo, so `viz_compare` and
 `demo_robustness` render from them instantly.
 
-The production lift is the 49-feature exergy dictionary and the locked
+The production lift is the 47-feature exergy dictionary and the locked
 controller tune is `(Np, Nc, alpha, rho_slack) = (12, 1, 1, 1.195)` with
 an adequacy-safety margin of `1.06`. On top of this controller the
 thesis also develops a few extensions (a practical ISS certificate, an

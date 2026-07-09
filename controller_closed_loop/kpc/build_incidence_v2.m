@@ -2,9 +2,11 @@ function K = build_incidence_v2(net)
 % BUILD_INCIDENCE_V2  Supply / return incidence matrices for Kirchhoff
 % conservation, set up to act on the flow-reference r_q.
 %
-% Imposing A r_q = b at every horizon together with q_0 conservative is
-% sufficient to keep q conservative for all k under q_{k+1} = a q_k +
-% (1-a) r_q,k. This avoids fitting V_seq for every edge flow.
+% Imposing A r_q = b at every horizon together with q_0 conservative keeps
+% the setpoints exactly conservative and q conservative at steady state
+% (q -> r_q per edge under q_{k+1} = a q_k + (1-a) r_q,k). The per-edge lag a
+% is non-uniform, so q carries a small nodal residual during flow transients
+% that decays over a few steps. This avoids fitting V_seq for every edge flow.
 
 ei      = edge_user_index(net);
 n_edges = numel(net.Edges);

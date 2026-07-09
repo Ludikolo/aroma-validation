@@ -2,7 +2,7 @@ function [Z, names, meta] = candidate_library(traj, p)
 % CANDIDATE_LIBRARY  Lifting psi(xi) for the Koopman predictor.
 %
 % Three feature blocks plus a constant:
-%   A thermal    T_0s, T_F0, T_s^i (5), T_r^i (5), T_0r           13
+%   A thermal    T_F0, T_s^i (5), T_r^i (5), T_0r                 12
 %   B hydraulic  q^i (5), Q_net                                    6
 %   C theta      theta^i = (T_s^i - T_r^i) q^i, per consumer       5
 % Optional source-delay block adds T_F0(t-d) and delayed bilinears.
@@ -24,10 +24,8 @@ feats = {};
 nm    = {};
 idx   = struct();
 
-% Block A: thermal (13)
-feats{end+1} = traj.T_0s(:)';            nm{end+1} = 'T_0s';
-idx.T_0s = numel(feats);
-
+% Block A: thermal (12). State-only lift: the source-supply command T_0s is an
+% input, so it enters the predictor through the B[u;d] regressor, not the lift.
 feats{end+1} = traj.T_F0(:)';            nm{end+1} = 'T_F0';
 idx.T_F0 = numel(feats);
 
@@ -173,18 +171,16 @@ if use_extras
 end
 
 % optional exergy block (gated for exergy production)
-% 12 bilinears appended AFTER the base 37-feature lift, filling rows 38..49
+% 11 bilinears appended AFTER the base 36-feature lift, filling rows 37..47
 % in this fixed order (Tamb = p.Text):
-%   q^i*(T_s^i - Tamb) (5), q^i*(T_r^i - Tamb) (5),
-%   Q_net*(T_0s - Tamb) (1), Q_net*(T_0r - Tamb) (1).
-% OFF by default -> base 37-feature lift. Enabled only when exergy is the
+%   q^i*(T_s^i - Tamb) (5), q^i*(T_r^i - Tamb) (5), Q_net*(T_0r - Tamb) (1).
+% OFF by default -> base 36-feature lift. Enabled only when exergy is the
 % adopted production lift.
-% THEORY (exergy block): bilinears q*(T - Tamb) on top of the base 37, gives the production lift n_z = 49
+% THEORY (exergy block): bilinears q*(T - Tamb) on top of the base 36, gives the production lift n_z = 47
 use_exergy = isfield(p, 'o2') && isfield(p.o2, 'use_exergy') && p.o2.use_exergy;
 if use_exergy
     T_amb = p.Text;
     Qnet  = sum(traj.q_users, 1);
-    T0s   = traj.T_0s(:)';
     T0r   = traj.T_0r(:)';
     idx.exergy_s = zeros(1, n_user);
     for i = 1:n_user
@@ -198,8 +194,6 @@ if use_exergy
         nm{end+1}    = sprintf('exergy_r_C%d', i);
         idx.exergy_r(i) = numel(feats);
     end
-    feats{end+1} = Qnet .* (T0s - T_amb);  nm{end+1} = 'exergy_net_s';
-    idx.exergy_net_s = numel(feats);
     feats{end+1} = Qnet .* (T0r - T_amb);  nm{end+1} = 'exergy_net_r';
     idx.exergy_net_r = numel(feats);
 end
