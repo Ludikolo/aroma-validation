@@ -4,6 +4,8 @@
 %   plus per-scenario figures, and finally checks nine physical
 %   invariants on the saved data.
 %
+%   See plant_validation.pdf, Section 3 (the figures) and Section 4 (the checks).
+%
 %   The plant simulator is the AROMA reference implementation; this
 %   file is the demonstration and validation
 %   layer on top of it; the plant code under shared/plant and
@@ -32,7 +34,7 @@ p = params();
 
 % Run the demo at the fine sample rate (Ts = 60 s) regardless of what
 % params.m carries on disk. The plant ODE itself runs in continuous
-% time via ode15s; p.Ts only sets the cadence at which q is updated and
+% time via ode45; p.Ts only sets the cadence at which q is updated and
 % the trajectory is read out. Sixty samples per hour gives the figures
 % enough resolution to show transient behaviour clearly.
 p.Ts = 60;
@@ -45,7 +47,6 @@ fprintf('Building plant...\n');
 [net, z0_cold] = build_plant(p);
 ei = edge_user_index(net);
 n_user = ei.n_user;
-n_edges = numel(net.Edges);
 
 % Trunk supply edge F0 -> F1 (flow into the network). Used at the end
 % to verify mass conservation: at steady state the trunk inflow must
@@ -89,10 +90,12 @@ scenarios = struct( ...
 % commercial midday peak around 13:00, shop pm peak around 17:00,
 % evening residential around 19:00, night, then back to morning).
 % F0 -> F1 trunk transit alone is 500 m / 0.334 m/s about 25 min at
-% nominal flow; the furthest consumer C5 (F0 -> F1 -> F6 -> F7 -> F8 =
-% 1883 m) sits about 94 min downstream. The supply_step scenario uses
-% three 8 h phases so every consumer has 6+ hours of fully settled
-% response per phase after the wave arrives.
+% nominal flow. The furthest consumer C5 is much slower than the trunk
+% velocity suggests: its terminal pipes carry only 0.12-0.24 kg/s, so
+% the first arrival is around 8.7 h (measured in demo_pulse.m), not the
+% 94 min a trunk-velocity estimate over the 1883 m path would give.
+% The supply_step scenario uses three 8 h phases so the main consumers
+% have hours of settled response per phase after the wave arrives.
 T_0s_funs = { ...
     @(t) p.Tin_nom, ...
     @(t) p.Tin_nom, ...
@@ -156,6 +159,11 @@ for k = 1:numel(scenarios)
     sc.c_i     = res.c_i;
     out{k} = sc;
 
+    % the |q_F0F1 - sum q_i| below is a max over the FULL run, so it picks
+    % up the flow transients: each edge lags its reference with its own
+    % first-order filter, which breaks trunk Kirchhoff for a few samples
+    % after a flow move (about 3 percent, decaying within a few samples).
+    % Conservation is asserted at steady state (T3 and T8 below).
     fprintf('  done (%d samples, max c-d %.2f W, min T_r %.2f C, max |q_F0F1 - sum q_i| %.2e)\n', ...
         numel(sc.t), max(sc.c_i(:) - sc.d_i(:)), min(sc.T_r_i(:)), ...
         max(abs(sc.q_F0_F1 - sum(sc.q_users, 1))));
@@ -225,26 +233,30 @@ for k = 1:numel(scenarios)
             assert(pct > 80 && pct < 99, ...
                 'T4 fail: supply_step should be partially capacity-bound (got %.2f)', pct);
         case 'variable_flow'
-            assert(pct > 80, 'T4 fail: variable_flow met %% suspiciously low (got %.2f)', pct);
+            % capacity binds during the 0.5x phases that overlap demand
+            % peaks; same 70-95 band as tests/validate_plant.m
+            assert(pct > 70 && pct < 95, ...
+                'T4 fail: variable_flow should bind at some peak (got %.2f)', pct);
         otherwise
             assert(pct >= 99, 'T4 fail: %s should reach >= 99 %% (got %.2f)', sc.name, pct);
     end
 end
 fprintf('T4 pass: capacity-bound vs adequate-capacity scenarios behave as expected\n');
 
-% T5: substation energy balance. The substation must satisfy
-% c = c_p * (T_s - T_r) * q exactly at every step. With q in kg/s
-% (AROMA convention) this is the energy-conservation identity for
-% mass flow; the residual should be machine precision.
-fprintf('\n  Substation energy consistency\n');
+% T5: storage-pipeline consistency. The saved c^(i) must equal
+% c_p * (T_s - T_r) * q^(i) recomputed from the saved arrays (with q
+% in kg/s, the AROMA convention, the factor is c_p not rho c_p).
+% simulate_plant computes c_i from these same arrays, so this checks
+% the save pipeline, not substation energy conservation.
+fprintf('\n  Storage-pipeline consistency (c vs cp dT q)\n');
 for k = 1:numel(scenarios)
     sc = scenarios(k);
     c_check = p.cp * (sc.T_s_i - sc.T_r_i) .* sc.q_users;
     res_sub = max(abs(sc.c_i - c_check), [], 'all');
     fprintf('  %-15s  max |c - cp dT q| = %.2e W\n', sc.name, res_sub);
-    assert(res_sub < 1e-6, 'T5 fail: %s substation residual %.2e W', sc.name, res_sub);
+    assert(res_sub < 1e-9, 'T5 fail: %s storage-pipeline residual %.2e W', sc.name, res_sub);
 end
-fprintf('T5 pass: c^(i) = c_p (T_s - T_r) q^(i) at machine precision\n');
+fprintf('T5 pass: saved c^(i) matches c_p (T_s - T_r) q^(i) (residual < 1e-9 W)\n');
 
 % T6: network energy ratio. The thermal energy actually extracted by
 % all consumers, divided by the water-side source power integrated
@@ -267,20 +279,21 @@ for k = 1:numel(scenarios)
 end
 fprintf('T6 pass: E_extracted / E_source_water in [0.5, 1.0] in every scenario\n');
 
-% T7: substation upper contracts. c >= 0 (no negative heat) and
-% T_r <= T_s (return below supply). Together with T1 + T2 these
-% cover all four bounds of the substation contract.
+% T7: substation upper contracts. The saved c_i is clipped at zero on
+% save, so the falsifiable quantity is the raw product cp (T_s - T_r) q
+% before the clip; plus T_r <= T_s (return below supply). Together with
+% T1 + T2 these cover all four bounds of the substation contract.
 fprintf('\n  Substation upper contracts\n');
 for k = 1:numel(scenarios)
     sc = scenarios(k);
-    viol_c_neg = max(0, -min(sc.c_i(:)));
+    c_raw = p.cp * (sc.T_s_i - sc.T_r_i) .* sc.q_users;
     viol_Tr_Ts = max(sc.T_r_i(:) - sc.T_s_i(:));
-    fprintf('  %-15s  min(c_i) = %6.2f W  max(T_r - T_s) = %+6.3f K\n', ...
-        sc.name, min(sc.c_i(:)), max(sc.T_r_i(:) - sc.T_s_i(:)));
-    assert(viol_c_neg <= 1, 'T7 fail: %s c_i below 0 by %.2f W', sc.name, viol_c_neg);
+    fprintf('  %-15s  min raw cp dT q = %6.2f W  max(T_r - T_s) = %+6.3f K\n', ...
+        sc.name, min(c_raw(:)), max(sc.T_r_i(:) - sc.T_s_i(:)));
+    assert(min(c_raw(:)) > -1, 'T7 fail: %s raw cp dT q below -1 W (%.2f W)', sc.name, min(c_raw(:)));
     assert(viol_Tr_Ts <= 0.1, 'T7 fail: %s T_r above T_s by %.3f K', sc.name, viol_Tr_Ts);
 end
-fprintf('T7 pass: c^(i) >= 0 AND T_r^(i) <= T_s^(i) on every step in every scenario\n');
+fprintf('T7 pass: raw cp dT q > -1 W AND T_r^(i) <= T_s^(i) on every step in every scenario\n');
 
 % T8: per-junction mass conservation on the FULL incidence matrices
 % (not just the trunk that T3 covered). At steady state every
@@ -295,8 +308,8 @@ for k = 1:numel(scenarios)
     res_return = max(abs(K.M_return * q_last));
     fprintf('  %-15s  supply residual = %.2e   return residual = %.2e   kg/s\n', ...
         sc.name, res_supply, res_return);
-    assert(res_supply < 1e-5, 'T8 fail: %s supply per-junction residual %.2e', sc.name, res_supply);
-    assert(res_return < 1e-5, 'T8 fail: %s return per-junction residual %.2e', sc.name, res_return);
+    assert(res_supply < 1e-9, 'T8 fail: %s supply per-junction residual %.2e', sc.name, res_supply);
+    assert(res_return < 1e-9, 'T8 fail: %s return per-junction residual %.2e', sc.name, res_return);
 end
 fprintf('T8 pass: M_supply * q = 0 AND M_return * q = 0 at every internal node\n');
 
@@ -322,7 +335,7 @@ for k = 1:numel(scenarios)
 end
 fprintf('T9 pass: source-side return mixing law holds at steady state (within pipe-loss tolerance)\n');
 
-fprintf('\nAll nine physical invariants verified. Plant simulator is correct.\n');
+fprintf('\nAll nine physical invariants hold on these six scenarios.\n');
 
 
 %% Local function for the variable-flow scenario

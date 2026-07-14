@@ -46,14 +46,14 @@ traj.T_0s = p.Tin_nom + res.u;  traj.r_q = res.r_q;  traj.T_ir = res.T_r_i;
 traj.d = res.d_i;  traj.theta = (res.T_s_i - res.T_r_i) .* res.q_users;
 traj.T_is = res.T_s_i;  traj.T_0r = res.Tout(R0_idx, :);  traj.T_F0 = res.Tout(F0_idx, :);
 traj.q_users = res.q_users;  traj.q_edges = res.q_edges;  traj.Tout = res.Tout;
-[Z, ~, meta] = candidate_library(traj, p);   % Z = 49-feature Koopman lift (37 base + 12 exergy); meta.idx.theta locates the 5 delivered-heat features
+[Z, ~, meta] = candidate_library(traj, p);   % Z = 47-feature Koopman lift (36 base + 11 exergy); meta.idx.theta locates the 5 delivered-heat features
 
 % U stacks the inputs the same way the fits expect: 35 rows = 1 source-supply-temp
 % offset T_0s, then 29 edge flow setpoints r_q, then 5 consumer return-temp setpoints T_ir.
 % D = per-consumer heat demand (the known forecast that lives in V_seq).
 U = [traj.T_0s(:)'; traj.r_q; traj.T_ir];  D = traj.d;
 n_u = size(U, 1);  th_ix = meta.idx.theta;    % n_u = 35; th_ix(i) = row of theta^(i) inside the lift
-% window: skip the lift warm-up (valid_start), leave one step of room for the h=1 target
+% window: skip the lift warm-up (valid_start), stop h0 steps early so target k+h0 stays in range
 N = size(Z, 2);  ks = max(1, meta.valid_start);  ke = N - h0;  kk = ks:ke;
 t_h = (kk + h0 - 1) * p.Ts / 3600;            % x-axis in hours (sample index -> h)
 r2 = @(pred, act) 1 - sum((pred - act).^2) / max(sum((act - mean(act)).^2), eps);
@@ -66,7 +66,7 @@ for pi = 1:numel(cons)
     for n = 1:numel(kk)
         % z0 = lift now; Vu = the h0 applied controls; Vd = the demand forecast over the same window
         k = kk(n); z0 = Z(:, k);  Vu = U(:, k : k+h0-1);  Vd = D(:, k+1 : k+h0);
-        % direct V_seq head for h=1, then cp converts theta [K.kg/s] -> heat [W]
+        % direct V_seq head at h0, then cp converts theta [K.kg/s] -> heat [W]
         c_multi(n) = p.cp * head_apply(fits.cp{hi0, i0}, fits.dp{hi0, i0}, z0, Vu, Vd, n_u, h0, has_dV);
         % iterated one-step rolled h0 steps: each step compounds its error
         z_it = z0;

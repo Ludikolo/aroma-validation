@@ -76,7 +76,8 @@ for e = 1:E
     net.Edges(e).D   = D;
     net.Edges(e).Acs = Acs;
 
-    % Ambient exchange coefficient [1/s]
+    % Ambient exchange coefficient [1/s]; default only, build_plant
+    % overwrites every edge with p.pipe.alpha
     net.Edges(e).alpha = 1e-5;
 end
 

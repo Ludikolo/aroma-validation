@@ -4,11 +4,12 @@
 % four controllers on the same plant, scenario, warmup and actuator limits, so only
 % the controller differs). Two time-domain panels: comfort (delivered heat vs demand
 % for the binding consumer) and speed (solve time per step against the Ts = 900 s
-% budget). Under the severe bind KPC tracks the demand best of all four and stays
-% above the comfort bar, while the iterated Koopman-LMPC and the Jacobian LMPC fall
-% below it; the exact-model NMPC is close on comfort but re-integrates the nonlinear
-% ODE every solve, so it is an order of magnitude slower and sometimes fails to
-% converge in the budget here.
+% budget). Under the severe bind the two Koopman controllers are flow-limited and tie
+% at the capacity ceiling, both above the comfort bar; the Jacobian LMPC falls below
+% it. The exact-model NMPC lands close to the Koopman pair on comfort but re-integrates
+% the nonlinear ODE every solve, so it is over an order of magnitude slower and does
+% not converge at every step. The direct-vs-iterated separation shows up away from the
+% ceiling, see viz_stress_sweep.
 
 clear; clc;
 here = fileparts(mfilename('fullpath'));

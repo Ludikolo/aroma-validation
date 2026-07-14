@@ -18,9 +18,9 @@ function dz = rhs_network(t, z, net, cp, mode, Text, Tin_source)
 % We return dz so the ODE solver can step forward.
 %
 % THEORY index:
-%   line 49: node mixing
-%   line 138: pipe advection
-%   line 216: source
+%   line 44: node mixing
+%   line 133: pipe advection
+%   line 211: source
 
 
 E = numel(net.Edges);

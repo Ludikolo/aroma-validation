@@ -7,7 +7,7 @@ function pred = build_kpc_v2_matrices(fits)
 %   Legacy:    theta^(i)_h = c_{h,i}^T z_0 + d_{h,i}^T V_seq_h
 %              V_seq_h = [u_0; ...; u_{h-1}],   dp length n_u*h.
 %
-%   d-in-V:    V_seq_h = [u_0; ...; u_{h-1}; d_0; ...; d_{h-1}],
+%   d-in-V:    V_seq_h = [u_0; ...; u_{h-1}; d_1; ...; d_h],
 %              dp length (n_u + n_user)*h, fits.includes_d_in_V = true.
 %              Adds pred.G_d (n_user*Np x Np*n_user) so the QP can
 %              compute c_pred(U, d_seq) = cp*(F z + G U + G_d D).
@@ -49,8 +49,8 @@ for i = 1:n_user
             dh_u = dh(1 : n_u * h);
             dh_d = dh(n_u * h + 1 : end);
             G  (row, 1:numel(dh_u)) = dh_u';
-            % dh_d is horizon-major in fit order: [d_0(C1..Cn); d_1(C1..Cn); ...]
-            % D_vec at solve time is consumer-major: [C1_h0..Cn_h0; C2_h0..Cn_h0; ...]
+            % dh_d is horizon-major in fit order: [d_1(C1..Cn); d_2(C1..Cn); ...]
+            % D_vec at solve time is consumer-major: [C1_h1..C1_hNp; C2_h1..C2_hNp; ...]
             % Re-index to put each fit coefficient at the right D_vec slot.
             for tt = 0 : h - 1
                 for cc = 1 : n_user

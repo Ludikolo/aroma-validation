@@ -10,11 +10,15 @@ function [Z, names, meta] = candidate_library(traj, p)
 % Including theta^i in the lift is what makes c^i = cp theta^i
 % linear in z, which is the trick that lets the QP run.
 %
+% The T_r^i features are the measured returns at time k (plant states, the
+% substations set them); the same channel also appears in the input stack U
+% as the planned T_ir sequence, which is never applied to the plant.
+%
 % THEORY index:
-%   line 59: theta
-%   line 71: delay embedding
-%   line 100: delayed bilinear
-%   line 182: exergy block
+%   line 61: theta
+%   line 73: delay embedding
+%   line 102: delayed bilinear
+%   line 183: exergy block
 
 n_user = size(traj.q_users, 1);
 N      = numel(traj.t);

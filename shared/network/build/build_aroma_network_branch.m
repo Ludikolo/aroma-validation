@@ -15,10 +15,10 @@ function [nodeNames, A, nodeData, mdotEdges, pipeDiameters] = build_aroma_networ
 if nargin < 1 || isempty(cp),   cp   = 4180;      end
 if nargin < 2 || isempty(mdot), mdot = 3.0;       end
 if nargin < 3 || isempty(mode), mode = 'heating'; end
-if nargin < 4 || isempty(Text), Text = 15;        end
+if nargin < 4 || isempty(Text), Text = 15;        end %#ok<NASGU> kept for the build_plant interface; ambient enters via network_from_digraph
 
-% Optional: how to split C5 branch flow over two forward paths 
-%We have a split at node F1 and a split at node R7. 
+% Optional: how to split C5 branch flow over two forward paths
+% We have a split at node F1 and a split at node R7.
 p = inputParser;
 p.addParameter('alpha_split', 0.5, @(x) isnumeric(x) && isscalar(x) && x>=0 && x<=1);
 p.parse(varargin{:});
@@ -157,7 +157,7 @@ end
 %% 6) Per-pipe diameter map (AROMA PDF Table 2)
 
 D_107 = 0.107;  % DN100 equivalent
-D_83  = 0.083;  % DN80 equivalent  
+D_83  = 0.083;  % DN80 equivalent
 D_70  = 0.070;  % DN65 equivalent
 
 pipeDiameters = containers.Map('KeyType','char','ValueType','double');

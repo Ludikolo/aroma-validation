@@ -6,7 +6,8 @@
 % show up as the per-day demand-met drifting down or the solve creeping up. A flat
 % met % line and a flat solve-time line mean it stays stable for long-horizon use.
 %
-% Output: results/longevity.mat (met_pct_day, suite_per_day, solve_ms_day, drift).
+% Output: results/longevity.mat (met_pct_day, worst_per_day, suite_per_day,
+% solve_ms_day, infeas_day, drift_total, infeas_rate).
 
 clear; clc;
 here = fileparts(mfilename('fullpath'));
@@ -48,7 +49,10 @@ fprintf('Warmup done. Starting %d-day closed loop ...\n', n_days);
 t0 = tic;
 % under the extreme bind the QP can very rarely fail to converge; the controller then
 % holds its previous solution and recovers (we report that infeasible-step rate below),
-% so silence the solver's per-failure warning to keep this long run's log readable
+% so silence the solver's per-failure warning to keep this long run's log readable.
+% the kpc_v2_solve warning carries no message id, so 'all' is the only handle; that
+% also mutes any other MATLAB warning for the duration of the loop, but every step's
+% exitflag is still logged and aggregated below, so no failure goes uncounted
 ws = warning('off', 'all');
 res = kpc_step_loop(net, res_wu, p, 0, T_warm, T_sim, pred, tune, ei, F0_idx, R0_idx, con_idx);
 warning(ws);
@@ -67,7 +71,7 @@ for d = 1:n_days_actual
         met_pct_day(d, i) = 100 * sum(res.c_i(i, idx)) / max(sum(res.d_i(i, idx)), 1e-9);
     end
     solve_ms_day(d, :) = [min(res.solve_ms(idx)), median(res.solve_ms(idx)), max(res.solve_ms(idx))];
-    infeas_day(d) = sum(res.exitflag(idx) <= 0);
+    infeas_day(d) = sum(res.exitflag(idx) <= 0);   % solver non-success; the slack-softened QP itself stays feasible
 end
 worst_per_day = min(met_pct_day, [], 2);
 suite_per_day = mean(met_pct_day, 2);

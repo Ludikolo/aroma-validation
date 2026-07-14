@@ -163,7 +163,6 @@ for j = 1:numel(traj_data)
     ks = max(1, m.valid_start);
     ke = N - H;
     if ke < ks, continue; end
-    n_z = size(Z, 1);
 
     for k = ks:ke
         z = Z(:, k);

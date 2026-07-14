@@ -12,7 +12,7 @@ offset = 0;  % "where the next block will start" in the big state vector
 
 % For each pipe, reserve 'n' entries and note where they start (offset)
 for e = 1:numel(net.Edges)                  % net.edges = number of physical pipes
-    ns = max(1, net.Edges(e).n);            % safety: at least 1 cell. net.edges.n is number of cells. 
+    ns = max(1, net.Edges(e).n);            % safety: at least 1 cell. net.edges.n is number of cells.
     net.Edges(e).offset = offset + 1;       % first index for this pipe
     offset = offset + ns;                   % move the cursor forward by n cells
 end

@@ -1,10 +1,5 @@
-function res = kpc_step_loop(net, res_wu, p, scenario_start, T_warm, T_sim, ...
+function [res, traj] = kpc_step_loop(net, res_wu, p, scenario_start, T_warm, T_sim, ...
                               pred, tune, ei, F0_idx, R0_idx, con_idx, lift_fn)
-% Optional 13th arg `lift_fn` is a function handle (traj, p) -> [Z, info, meta]
-% used to produce the lifted state. Defaults to candidate_library.
-if nargin < 13 || isempty(lift_fn)
-    lift_fn = @(t, pp) candidate_library(t, pp);
-end
 % KPC_STEP_LOOP  Run the KPC controller in closed loop for T_sim
 % seconds. Each step builds the lifted state z, solves the KPC QP, applies
 % the first input to the plant for one Ts (via simulate_plant), and appends
@@ -13,6 +8,17 @@ end
 % temperatures T_0s/T_0r, network flow Q_net, solve time and exitflag.
 % scenario_start is the wall-clock time at warmup start, needed so the
 % diurnal features in the lift line up between training and deployment.
+%
+% Optional 13th arg `lift_fn` is a function handle (traj, p) -> [Z, info, meta]
+%
+% Second output `traj` is the full rolling trajectory (warmup included, so the
+% delay features have their history), in the same field layout the identification
+% trajectories use. eval_dictionary_gap uses it to score a lift on-policy.
+% used to produce the lifted state. Defaults to candidate_library.
+
+if nargin < 13 || isempty(lift_fn)
+    lift_fn = @(t, pp) candidate_library(t, pp);
+end
 
 Ts      = p.Ts;
 N_cl    = round(T_sim / Ts);
@@ -206,12 +212,12 @@ tt = struct();
 for f = 1:numel(flds)
     nm = flds{f};
     v = traj.(nm);
-    if ischar(v) || isstruct(v) || numel(v) == 1
+    if ischar(v) || isstruct(v) || isscalar(v)
         % scalars (e.g. t_offset) and structs pass through verbatim
         tt.(nm) = v;
         continue;
     end
-    if isvector(v) && size(v, 1) == 1
+    if isrow(v)
         tt.(nm) = v(1:n);
     elseif ismatrix(v) && size(v, 2) >= n
         tt.(nm) = v(:, 1:n);

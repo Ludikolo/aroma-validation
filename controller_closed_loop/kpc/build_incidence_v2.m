@@ -3,10 +3,13 @@ function K = build_incidence_v2(net)
 % conservation, set up to act on the flow-reference r_q.
 %
 % Imposing A r_q = b at every horizon together with q_0 conservative keeps
-% the setpoints exactly conservative and q conservative at steady state
-% (q -> r_q per edge under q_{k+1} = a q_k + (1-a) r_q,k). The per-edge lag a
-% is non-uniform, so q carries a small nodal residual during flow transients
-% that decays over a few steps. This avoids fitting V_seq for every edge flow.
+% the setpoints exactly conservative at every junction and q conservative
+% there at steady state (q -> r_q per edge under q_{k+1} = a q_k + (1-a) r_q,k).
+% The loop-closure edge R0->F0 appears only in the dropped R0 row, so its
+% reference is bounded by box and rate limits only, not by conservation.
+% The per-edge lag a is non-uniform, so q carries a small nodal residual
+% during flow transients that decays over a few steps. This avoids fitting
+% V_seq for every edge flow.
 
 ei      = edge_user_index(net);
 n_edges = numel(net.Edges);
@@ -63,8 +66,9 @@ for c = 1:ei.n_user
     Ci_idx  = find_node(net, Ci);
 
     % supply: the C_i row -1 is the actual Q_net coupling for this user's
-    %         r_q (consumer outflow). The F0 supply row is dropped below for
-    %         full rank, so no F0 entry is set here.
+    %         r_q (consumer outflow); it cancels the incidence entry of the
+    %         stub, so the C_i supply row of M is 0 = 0 by construction.
+    %         The F0 supply row is dropped below, so no F0 entry is set here.
     b_s_sel(sn_row(Ci_idx), e_user) = -1;
 
     % return: R0 row stays zero because the closure absorbs Q_net here
@@ -76,8 +80,11 @@ end
 M_kirch_supply = A_s_full - b_s_sel;       % 14 x n_edges
 M_kirch_return = A_r_full - b_r_sel;       % 14 x n_edges
 
-% Drop one redundant row per network (rank n_nodes - 1): F0 in supply,
-% R0 in return. Otherwise Aeq is rank-deficient.
+% Drop the source row of each network: F0 in supply, R0 in return. The F0
+% row carries no source-injection term, so keeping it would pin r_q(F0->F1)
+% at zero. The R0 row is the only row containing the loop-closure edge
+% R0->F0, so dropping it leaves that reference outside the conservation
+% block (box and rate limits still apply).
 keep_s = setdiff(1:n_sn, F0_row);
 keep_r = setdiff(1:n_rn, R0_row);
 

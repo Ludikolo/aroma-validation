@@ -8,9 +8,12 @@
 %   The locked-in tune (Np = 12, Nc = 1, alpha = 1, rho_slack = 1.195)
 %   was selected by a cross-scenario Pareto sweep followed by
 %   Bayesian optimisation over the slack penalty. See
-%   CONTROLLER_NOTES.md for the formulation and tune-selection details.
+%   controller_validation.pdf for the formulation and tune-selection details.
 %
-%   What this demo does (~30 s wall):
+%   See controller_validation.pdf, Section 3 (the figures) and Section 4 (the checks).
+%
+%   What this demo does (~5 min wall, dominated by the 96 QP solves
+%   at roughly a second each plus the plant integration):
 %     1. loads the predictor fits (predictor_open_loop/results),
 %        the locked tune, and the 6-scenario suite at design capacity.
 %     2. builds the plant at stressed capacity (mdot_scale = 0.6),
@@ -20,11 +23,13 @@
 %     4. computes per-consumer demand met %, plots a tracking trace,
 %        and saves demo.mat.
 %
+%   Note on the numbers: this demo runs at mdot_scale = 0.6 (stressed)
+%   against a hold-nominal baseline, so the reported met % sits near
+%   100 %. The thesis flagship number is the benchmark at
+%   mdot_scale = 0.35 (97.56 % worst-consumer), not this demo's figure.
+%
 %   Validation of seven controller invariants on the saved demo.mat is
 %   in tests/validate_controller.m.
-%
-% THEORY index: (res_kpc)
-%   line 65: stress test
 
 clear; clc;
 startup;
@@ -37,6 +42,7 @@ pred_res   = fullfile(fileparts(root), 'predictor_open_loop', 'results');
 if ~exist(figs_dir, 'dir'), mkdir(figs_dir); end
 
 fprintf('\n=== Controller closed-loop demo (KPC vs hold-nominal) ===\n');
+fprintf('Demo runs at mdot_scale = 0.6 vs hold-nominal (prints ~100%%); thesis flagship = benchmark at mdot 0.35 (97.56%% worst-consumer)\n');
 fprintf('Sample rate Ts = %g s, locked tune from cross-scenario Pareto + BO\n', p.Ts);
 
 %% Load predictor fits + locked tune
@@ -62,7 +68,7 @@ fprintf('Locked tune: (Np, Nc, alpha, rho_slack) = (%d, %d, %g, %.2f)\n', ...
         H.Np_best, H.Nc_best, A.alpha_star, tune.rho_slack);
 
 %% Build plant at stressed capacity (mdot_scale = 0.6)
-% THEORY (stress test): at mdot_scale 0.6 the saturation c_max binds, the regime where control quality shows
+% at mdot_scale 0.6 the saturation c_max binds, the regime where control quality shows
 mdot_scale = 0.6;
 T_warm     = 30 * 60;
 T_sim      = 24 * 3600;
@@ -82,6 +88,7 @@ for i = 1:n_user
     con_idx(i) = find(strcmp({net.Nodes.name}, ei.consumers{i}));
 end
 
+% 23 nodes, 29 edges is fixed for this AROMA network
 fprintf('Plant: 23 nodes, 29 edges, mdot_scale = %.2f (stressed)\n', mdot_scale);
 
 %% 30 min warmup
@@ -142,13 +149,14 @@ for si = 1:n_sc
 end
 
 fprintf('\nHeadline at design capacity (6 scenarios x 5 consumers):\n');
-fprintf('  KPC  worst cell : %.3f %%   (only controller >= 95 %% on every cell)\n', ...
-        min(met_design_kpc(:)));
+fprintf('  KPC  worst cell : %.3f %%\n', min(met_design_kpc(:)));
 fprintf('  hold worst cell : %.3f %%\n', min(met_design_hold(:)));
+fprintf('  (hold also passes at design capacity; it drops below the 95 %% bar\n');
+fprintf('   in the stressed run above, where KPC keeps every consumer met)\n');
 
 %% Plot 1: tracking trace at the consumer the baseline struggles with most
 [~, worst_i] = min(met_hold);
-fig = figure('Visible', 'off', 'Position', [100 100 900 360]);
+fig = figure('Visible', 'off', 'Position', [100 100 780 420]);
 t_h_kpc  = (0:size(res_kpc.d_i, 2) -1) * p.Ts / 3600;
 t_h_hold = (0:size(res_hold.c_i, 2)-1) * (T_sim / size(res_hold.c_i, 2)) / 3600;
 plot(t_h_kpc,  res_kpc.d_i(worst_i, :)  / 1000, 'k-',  'LineWidth', 1.4, 'DisplayName', 'demand d^{(i)}');
@@ -160,8 +168,8 @@ xlabel('Time [h]'); ylabel('Heat [kW]');
 title(sprintf('Tracking at the consumer hold struggles with (C%d: KPC %.1f%%, hold %.1f%%)', ...
               worst_i, met_kpc(worst_i), met_hold(worst_i)));
 legend('Location', 'best');
-print(fig, fullfile(figs_dir, 'tracking.pdf'), '-dpdf', '-bestfit');
-print(fig, fullfile(figs_dir, 'tracking.png'), '-dpng', '-r150');
+exportgraphics(fig, fullfile(figs_dir, 'tracking.pdf'), 'ContentType', 'vector');
+exportgraphics(fig, fullfile(figs_dir, 'tracking.png'), 'Resolution', 150);
 close(fig);
 
 %% Save demo artefact for validate_controller.m

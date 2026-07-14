@@ -1,7 +1,7 @@
 % VIZ_PREDICTOR_ERROR  Forecast skill vs horizon.
 %
-% On a normal operating day (full diurnal demand at nominal flow, the regime the
-% controller runs in) I forecast every horizon from 1 to 16 steps (15 min .. 4 h)
+% On a held-out operating day (full diurnal demand at nominal flow, the regime the
+% controller runs in, at a phase the fit never saw) I forecast every horizon from 1 to 16 steps (15 min .. 4 h)
 % two ways and score each against the plant: the direct multi-step Koopman map
 % (V_seq) and the iterated one-step Koopman map (A,B). Skill is the R^2 on delivered
 % heat, averaged over the five consumers. The direct map keeps R^2 near 1 across the
@@ -35,26 +35,31 @@ n_user = size(fits.cp, 2);    % consumers = number of columns in the per-(h,i) f
 has_dV = isfield(fits, 'includes_d_in_V') && fits.includes_d_in_V;
 
 % --- generate a normal operating day: nominal flow, full diurnal demand ---
-% This is the deployment regime (smooth diurnal day at design flow), not the
-% PRBS the fits were trained on, so it is an honest out-of-sample horizon test.
+% This is the deployment regime (smooth diurnal day at design flow) rather than the
+% PRBS the fits were mostly trained on. The operational days in the training set sit
+% on a 3 h phase grid (t_offset = 0, 3, ... 21 h, see data/generate_operational.m), so
+% I score on a day at 10.5 h, half way between two training phases. That day is not in
+% the fit, which is what makes this a held-out horizon test rather than a replay of a
+% training day.
+t_off_h = 10.5;                % phase of the day scored here [h], off the training grid
 [net, z0] = build_plant(p);
 mdotE  = net.mdotEdges(:);     % the network's nominal per-edge mass flows [kg/s] = the design operating point
 F0_idx = find(strcmp({net.Nodes.name}, 'F0'));   % source feed node, for T_F0 below
 R0_idx = find(strcmp({net.Nodes.name}, 'R0'));   % source return node, for T_0r below
-% t_offset = 0 so the built-in diurnal demand starts at midnight; r_q_fun pins flow at the
-% nominal edge setpoints (drives q as a state instead of the scalar exogenous w)
-p_run = p; p_run.t_offset = 0; p_run.r_q_fun = @(t) mdotE;
+% r_q_fun pins flow at the nominal edge setpoints (drives q as a state instead of the
+% scalar exogenous w); t_offset shifts where in the diurnal cycle the day starts
+p_run = p; p_run.t_offset = t_off_h * 3600; p_run.r_q_fun = @(t) mdotE;
 % u_fun = @(t) 0  -> zero source-supply offset, so supply sits at p.Tin_nom all day
 % w_fun = @(t) 1  -> exogenous flow scale, ignored here since r_q_fun drives the flow
 % 26 h so there is a full day of valid samples after the 2 h warm-up is dropped
 res = simulate_plant(net, z0, p_run, @(t) 0, @(t) 1.0, 26 * 3600);
 
-traj.t = res.t; traj.t_offset = 0;
+traj.t = res.t; traj.t_offset = p_run.t_offset;
 traj.T_0s = p.Tin_nom + res.u;  traj.r_q = res.r_q;  traj.T_ir = res.T_r_i;
 traj.d = res.d_i;  traj.theta = (res.T_s_i - res.T_r_i) .* res.q_users;
 traj.T_is = res.T_s_i;  traj.T_0r = res.Tout(R0_idx, :);  traj.T_F0 = res.Tout(F0_idx, :);
 traj.q_users = res.q_users;  traj.q_edges = res.q_edges;  traj.Tout = res.Tout;
-% Z = the Koopman lift z_k of this day (n_z x N); 49 features = 37 base + 12 exergy
+% Z = the Koopman lift z_k of this day (n_z x N); 47 features = 36 base + 11 exergy
 % bilinears in production. meta.idx says where each feature sits in z.
 [Z, ~, meta] = candidate_library(traj, p);
 % U = the input vector the predictors expect, stacked the same way as in the fit:
@@ -105,7 +110,7 @@ plot(H, r2_v, 'b-o', 'LineWidth', 1.8, 'MarkerSize', 5);
 grid on; xlabel('forecast horizon [15-min steps]'); ylabel('R^2 (delivered heat)');
 xlim([1 H(end)]); ylim([floor(min(r2_i)*20)/20, 1]);
 legend('iterated one-step', 'direct multi-step', 'Location', 'southwest');
-title('Forecast skill vs horizon, normal operating day (all consumers)');
+title('Forecast skill vs horizon, held-out operating day (all consumers)');
 
 % WHAT YOU SEE: direct multi-step stays near R^2 = 1 the whole way out, while the
 % iterated one-step is equal at h = 1 and then degrades as its rollout compounds.

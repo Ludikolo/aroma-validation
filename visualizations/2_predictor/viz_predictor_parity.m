@@ -1,10 +1,14 @@
 % VIZ_PREDICTOR_PARITY  Predicted vs actual delivered heat, on the diagonal.
 %
-% Four panels for a normal day, every consumer: the forecast at 1, 5, 10 and 16
-% steps ahead (15 min .. 4 h). The 1-step is the move the controller applies; the
-% other three are genuine multi-step forecasts. On the diagonal = accurate, and
+% Four panels for a held-out operating day, every consumer: the forecast at 1, 5, 10
+% and 16 steps ahead (15 min .. 4 h). The 1-step is the move the controller applies;
+% the other three are genuine multi-step forecasts. On the diagonal = accurate, and
 % it stays there at every horizon. The demand forecast over the horizon is part
 % of the predictor input (as in the paper).
+%
+% The operational days in the training set sit on a 3 h phase grid (t_offset =
+% 0, 3, ... 21 h, see data/generate_operational.m). I score at 10.5 h, half way
+% between two of them, so the day scored here is not one the fit saw.
 
 clear; clc;
 here = fileparts(mfilename('fullpath'));
@@ -21,20 +25,21 @@ F = load(fullfile(root, 'predictor_open_loop', 'results', 'vseq_fits_full.mat'))
 % (demand-in-V). flag it so the rollout below adds that block
 has_dV = isfield(fits, 'includes_d_in_V') && fits.includes_d_in_V;
 
-% build the network and drive it as a normal operational day: hold the edge flows at
+% build the network and drive it as an operational day: hold the edge flows at
 % their nominal values mdotEdges with the built-in diurnal demand. this is the
 % deployment regime we forecast on, not the PRBS data the predictor was trained on
+t_off_h = 10.5;                 % phase of the day scored here [h], off the training grid
 [net, z0] = build_plant(p); mdotE = net.mdotEdges(:);
 R0 = find(strcmp({net.Nodes.name}, 'R0')); F0 = find(strcmp({net.Nodes.name}, 'F0'));
 % nominal flows for every edge, no source-temp offset (handled below), 26 h of sim
-pr = p; pr.t_offset = 0; pr.r_q_fun = @(t) mdotE;
+pr = p; pr.t_offset = t_off_h * 3600; pr.r_q_fun = @(t) mdotE;
 res = simulate_plant(net, z0, pr, @(t) 0, @(t) 1.0, 26 * 3600);
-tr.t = res.t; tr.t_offset = 0; tr.T_0s = p.Tin_nom + res.u; tr.r_q = res.r_q; tr.T_ir = res.T_r_i;
+tr.t = res.t; tr.t_offset = pr.t_offset; tr.T_0s = p.Tin_nom + res.u; tr.r_q = res.r_q; tr.T_ir = res.T_r_i;
 % theta^i = (T_s^i - T_r^i) * q^i [K.kg/s], the per-consumer delivered-heat feature;
 % multiply by p.cp later to get heat in W
 tr.theta = (res.T_s_i - res.T_r_i) .* res.q_users; tr.T_is = res.T_s_i; tr.T_0r = res.Tout(R0, :);
 tr.T_F0 = res.Tout(F0, :); tr.q_users = res.q_users; tr.q_edges = res.q_edges; tr.Tout = res.Tout; tr.d = res.d_i;
-% Z = the 49-feature Koopman lift (37 base + 12 exergy bilinears), one column per step.
+% Z = the 47-feature Koopman lift (36 base + 11 exergy bilinears), one column per step.
 % U = the control input stacked as [T_0s; r_q; T_ir]: 1 source supply temperature,
 % 29 edge flow setpoints, 5 consumer return-temp setpoints, so n_u = 35.
 % D = per-consumer heat demand [W], the known forecast that feeds the dp demand tail

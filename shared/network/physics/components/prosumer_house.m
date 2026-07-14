@@ -2,7 +2,7 @@ function [Tout, c_i, d_i] = prosumer_house(t, Tsup, mdot, cp, prm, mode)
 % PROSUMER_HOUSE  Substation: heat extraction with T_r >= T_r_min and
 % c <= d. Falls back to legacy c = d when prm.T_r_min is not set.
 % Energy balance: c = mdot * cp * (Tsup - Tout) in heating.
-% 
+%
 %
 % THEORY index:
 %   line 27: substation saturation

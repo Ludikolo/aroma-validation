@@ -18,6 +18,9 @@ function result = simulate_plant(net, z0, p, u_fun, w_fun, T_sim)
 %                       from aggregate demand when flow_mode = 'demand_driven')
 %     result.Tout    - [n_nodes x N] all node outlet temperatures
 %     result.z_final - final ODE state vector (for warm-starting next sim)
+%     result also carries q_edges, q_users, edge_idx, T_s_i, T_r_i,
+%       d_i and c_i (plus r_q in dynamic-flow mode and the Q_* series in
+%       demand-driven mode); d_i and c_i give the met % headline.
 %
 %   Flow-mode extensions (p.flow_mode):
 %     'exogenous' (default) - w comes from w_fun as in the paper. Back-compat.
@@ -31,7 +34,7 @@ function result = simulate_plant(net, z0, p, u_fun, w_fun, T_sim)
 %     scalar-w behaviour.
 %
 % THEORY index:
-%   line 215: sampled data
+%   line 225: sampled data
 
 Ts = p.Ts;
 t_sample = 0 : Ts : T_sim;
@@ -56,7 +59,7 @@ if isfield(p, 'flow_mode') && ~isempty(p.flow_mode)
 end
 is_demand_driven = strcmp(flow_mode, 'demand_driven');
 
-if is_demand_driven %flow is calculated by driven (other test)--> now is off
+if is_demand_driven   % demand-driven flow mode; off in every shipped run
     dT_L     = p.demand.delta_T_L;
     Q_design = p.cp * p.mdot_nom * dT_L;         % [W] denominator for w
     % w_max_flow may be a scalar (constant capacity) or @(t) for a
@@ -150,8 +153,11 @@ for k = 1:N
     % simulator-relative time is enough there. Absolute time is only
     % needed for the demand-driven aggregate flow path.
     if is_demand_driven
+        % pass simulator-relative time: the consumer params already carry
+        % t_offset (injected above), so adding it here double-shifted the
+        % demand phase; this mode is off in every shipped run
         t_abs      = t_now + t_offset;
-        Q_tot      = compute_total_demand(net, t_abs);
+        Q_tot      = compute_total_demand(net, t_now);
         w_max_now  = w_max_fun(t_abs);
         Q_cap_now  = w_max_now * Q_design;
         am_raw     = Q_tot / Q_design;
@@ -239,7 +245,6 @@ end
 
 
 function idx = find_node(net, name)
-idx = [];
 for n = 1:numel(net.Nodes)
     if strcmp(net.Nodes(n).name, name), idx = n; return; end
 end

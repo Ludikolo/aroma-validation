@@ -6,9 +6,9 @@ function res = lmpc_step_loop(net, res_wu, p, scenario_start, T_warm, T_sim, ...
 % same demand forecast, same one-Ts plant step via simulate_plant, same
 % recorded outputs. That is what makes the comparison fair: identical
 % plant, scenario, warmup and apply. The only differences are that we
-% rebuild the predictor every step (the bilinear-c linearisation depends
-% on the previous-step operating point, so the matrices change with the
-% trajectory) and call lmpc_solve instead of kpc_v2_solve.
+% rebuild the predictor every step (F and G are fixed by A,B, but the
+% demand roll-out offsets and the energy-term operating point change
+% with the trajectory) and call lmpc_solve instead of kpc_v2_solve.
 %
 % Instead of a prebuilt `pred` we take `fit_iter` (the iterated A,B) plus
 % `Np` (the same prediction horizon KPC uses). The 14th arg `lift_fn` is
@@ -194,11 +194,11 @@ tt = struct();
 for f = 1:numel(flds)
     nm = flds{f};
     v = traj.(nm);
-    if ischar(v) || isstruct(v) || numel(v) == 1
+    if ischar(v) || isstruct(v) || isscalar(v)
         tt.(nm) = v;
         continue;
     end
-    if isvector(v) && size(v, 1) == 1
+    if isrow(v)
         tt.(nm) = v(1:n);
     elseif ismatrix(v) && size(v, 2) >= n
         tt.(nm) = v(:, 1:n);

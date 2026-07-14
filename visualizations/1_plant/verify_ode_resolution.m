@@ -7,7 +7,9 @@
 % step. For each I measure the largest difference (over all consumers and the whole
 % horizon) from the finest setting. If the solver is reliable both deviations come out
 % tiny, at the round-off floor, so the default settings (Ts = 900 s, RelTol = 1e-6)
-% are already converged and the plant solutions can be trusted.
+% are already converged. Scope: the sweep runs the transport ODE with demand zeroed
+% and constant flow, so it certifies resolution independence of the pipe integration,
+% not of the full scenario set (demo_plant exercises those).
 %
 % Runs live against build_plant + simulate_plant; nothing is loaded from a .mat.
 % Note: Test B uses the optional p.ode_reltol override in simulate_plant (one
@@ -25,8 +27,8 @@ p0 = params();
 % Only the plant side matters here: this is a pure ODE check, so nothing from
 % the Koopman fits / lift / horizons is loaded or used.
 step_K  = 6;            % source supply step [C]; equals p.u_max so it is the
-                        % biggest legal supply move, the +6 C response I showed
-                        % in the meeting. Big step = worst case for the solver.
+                        % biggest legal supply move. Big step = worst case for
+                        % the solver.
 T_warm  = 2 * 3600;     % warmup [s]; settle the network before the step so the
                         % deviation we measure is the step response, not startup
 T_sim   = 4 * 3600;     % response window [s]; long enough for the +6 C to travel
@@ -127,10 +129,16 @@ fprintf('Test B - ode45 RelTol (vs tightest %.0e, Ts = %d s):\n', tol_list(end),
 for k = 1:numel(tol_list)
     fprintf('  RelTol = %.0e   max deviation = %.3e C\n', tol_list(k), devB(k));
 end
+% hard asserts so this script actually fails when a resolution level moves
+% the answer (observed deviations are ~1e-11 C, so 1e-6 leaves huge margin)
+assert(max(devA) < 1e-6, ...
+    'resolution check fail: time-step sweep deviates by %.3e C (limit 1e-6)', max(devA));
+assert(max(devB) < 1e-6, ...
+    'resolution check fail: tolerance sweep deviates by %.3e C (limit 1e-6)', max(devB));
 fprintf(['\nVerdict: tightening the ode45 tolerance changes the answer by < %.0e C (Test B),\n', ...
          'and at the control instants the solution agrees to < %.0e C across all time steps\n', ...
-         '(Test A). The defaults (Ts = 900 s, RelTol = 1e-6) are converged, so the plant\n', ...
-         'solutions can be trusted.\n'], max(devB), max(devA));
+         '(Test A). Both pass the 1e-6 C assert, so the defaults (Ts = 900 s, RelTol = 1e-6)\n', ...
+         'are converged for the pipe-transport integration.\n'], max(devB), max(devA));
 fprintf('Saved verify_ode_resolution.pdf\n');
 
 

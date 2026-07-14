@@ -38,8 +38,8 @@ n_z = size(tr{1}.Z, 1);
 n_u = size(tr{1}.U, 1);
 horizons = fits.horizons;
 
-% smaller lambda grid (these targets are easier to fit than theta).
-% lam_v grid extended to match the V_seq theta fit (see fit_vseq.m).
+% same lambda grids as the V_seq theta fit (see fit_vseq.m); these targets
+% are easier to fit than theta, but the val-selected lam_v can still sit high.
 lam_z_grid = [3 30];
 lam_v_grid = [3 30 300 3000 30000 300000];
 
@@ -98,8 +98,8 @@ for hi = 1:numel(horizons)
     end
 
     if any(h == echo_h)
-        fprintf('  h=%d:  Ts_C2 RMSE=%.4f K   q_C2 RMSE=%.4f kg/s   T_0r RMSE=%.4f K   mix max RMSE=%.4f K*kg/s\n', ...
-            h, rmse_Ts, rmse_q, rmse_T0r, rmse_mix_max);
+        fprintf('  h=%d:  Ts_C%d RMSE=%.4f K   q_C%d RMSE=%.4f kg/s   T_0r RMSE=%.4f K   mix max RMSE=%.4f K*kg/s\n', ...
+            h, n_user, rmse_Ts, n_user, rmse_q, rmse_T0r, rmse_mix_max);
     end
 end
 

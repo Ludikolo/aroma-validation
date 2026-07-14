@@ -38,7 +38,7 @@ function pred = build_lmpc_pred(fit_iter, Np, z_0, u_prev, p, n_edges, n_user, d
 %   Np       : prediction horizon (samples)
 %   z_0      : current lifted state (n_z x 1)
 %   u_prev   : previous applied input (35 x 1) = [T_0s; r_q; T_ir]
-%   p        : params (uses p.cp)
+%   p        : params (not used here; lmpc_solve applies p.cp)
 %   n_edges  : number of network edges (29)
 %   n_user   : number of consumers (5)
 %   d_seq    : demand forecast over the horizon, n_user x Np. d_seq(:,h)
@@ -70,8 +70,8 @@ n_z = size(A, 1);
 n_u   = 1 + n_edges + n_user;     % 35 control inputs
 n_dem = n_user;                   % 5 demand inputs
 assert(size(B, 2) == n_u + n_dem, ...
-    'build_lmpc_pred: B width %d, expected %d (35 controls + %d demand)', ...
-    size(B, 2), n_u + n_dem, n_dem);
+    'build_lmpc_pred: B width %d, expected %d (%d controls + %d demand)', ...
+    size(B, 2), n_u + n_dem, n_u, n_dem);
 assert(isequal(size(d_seq), [n_user, Np]), ...
     'build_lmpc_pred: d_seq must be n_user x Np');
 B_ctrl = B(:, 1:n_u);

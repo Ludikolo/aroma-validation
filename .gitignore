@@ -20,6 +20,9 @@ slprj/
 *.bbl
 *.blg
 
+# delivery ships the PDFs, not the LaTeX sources
+*.tex
+
 # OS
 .DS_Store
 Thumbs.db
@@ -27,3 +30,4 @@ Thumbs.db
 # local working folders
 notes/
 copies/
+run_all_log.txt

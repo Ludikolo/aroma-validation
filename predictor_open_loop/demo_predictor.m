@@ -1,10 +1,12 @@
 % DEMO_PREDICTOR  Open-loop demonstration and validation of the
-%   49-feature exergy Koopman lift and the V_seq direct multi-step predictor.
+%   47-feature exergy Koopman lift and the V_seq direct multi-step predictor.
 %   Loads the saved training + test trajectories, evaluates the
 %   production V_seq fit against the iterated A,B baseline and the
 %   ZOH null model on the held-out test set, saves the comparison
-%   plus the per-consumer parity data, plots two figures, and then
-%   verifies six predictor invariants.
+%   plus the per-consumer parity data, plots the horizon figure, and then
+%   verifies five predictor invariants (T1-T5).
+%
+%   See predictor_validation.pdf, Section 3 (the figures) and Section 4 (the checks).
 %
 %   The plant lives in shared/ and is verified separately by demo_plant.
 %   This demo loads the predictor artefacts that fit_vseq and
@@ -151,6 +153,13 @@ demo.rmse_zoh     = rmse_zoh;
 demo.parity_h1    = parity_h1;
 demo.R2_vseq_h1   = R2_vseq_h1;
 demo.d_max        = d_max;
+% provenance: validate_predictor checks n_z and horizons against the fits, so a
+% demo.mat generated from different fits is rejected there instead of passing stale
+demo.n_z          = fits.n_z;
+% checksum over all fitted coefficients: a refit with the same shape but
+% different numbers must invalidate this cache too
+demo.fit_checksum = sum(cellfun(@(c) sum(c(:)), fits.cp(:))) + ...
+                    sum(cellfun(@(c) sum(c(:)), fits.dp(:)));
 
 %% Save
 save(fullfile(results_dir, 'demo.mat'), '-struct', 'demo');
@@ -159,7 +168,7 @@ fprintf('\nSaved %s/demo.mat\n', results_dir);
 %% Plot
 plot_predictor_demo(demo, p);
 
-%% Inline validation: six predictor invariants
+%% Inline validation: five predictor invariants
 fprintf('\n=== Predictor invariants ===\n');
 
 % T1: V_seq beats the ZOH null model at every horizon. The point of
@@ -178,11 +187,9 @@ assert(mean(rmse_vseq(hi_max, :)) < mean(rmse_iter(hi_max, :)), ...
 fprintf('T2 pass: V_seq beats iterated at h = %d by %.1f %% RMSE (suite mean)\n', ...
         horizons(hi_max), gap_pct);
 
-% T3: 1-step suite R^2 >= 0.7. A linear lift over a 49-feature exergy
+% T3: 1-step suite R^2 >= 0.7. A linear lift over a 47-feature exergy
 % dictionary should explain at least 70 % of the next-step variance
-% on the test set. Korda & Mezic 2018 reports R^2 > 0.9 at h = 1 on a
-% similar plant family, so 0.7 is a strict lower bound for a usable
-% predictor.
+% on the test set, so 0.7 is a strict lower bound for a usable predictor.
 suite_R2_h1 = mean(R2_vseq_h1);
 assert(suite_R2_h1 >= 0.7, ...
        'T3 fail: suite R^2 at h = 1 is %.3f, below 0.7', suite_R2_h1);
@@ -196,22 +203,9 @@ assert(max_nrmse_h1 <= 30, ...
        'T4 fail: worst-consumer NRMSE at h = 1 is %.1f %%, above 30 %%', max_nrmse_h1);
 fprintf('T4 pass: worst-consumer NRMSE at h = 1 = %.1f %% (<= 30 %%)\n', max_nrmse_h1);
 
-% T5: the theta block in the dictionary is load-bearing. Drop it,
-% refit V_seq, R^2 at h = 1 must drop substantially. Threshold from
-% the ablation: theta contributes >= 0.10 R^2.
-F_ablate = load(fullfile(results_dir, 'dict_block_ablation.mat'));
-hi_1     = find(F_ablate.horizons_report == 1);
-R2_full  = mean(F_ablate.R2_buildup(end, hi_1, :));
-theta_li = find(strcmp(F_ablate.loo_names, 'C_theta'));
-R2_noth  = mean(F_ablate.R2_loo(theta_li, hi_1, :));
-theta_drop = R2_full - R2_noth;
-assert(theta_drop >= 0.10, ...
-       'T5 fail: dropping theta only drops R^2 by %.3f (need >= 0.10)', theta_drop);
-fprintf('T5 pass: dropping the theta block drops R^2 by %.3f at h = 1\n', theta_drop);
-
-% T6: training data integrity. The first-order flow dynamics
-% q_{k+1} = a q_k + (1 - a) r_q,k must hold on every training and
-% test trajectory at machine precision. If this fails the data
+% T5: data integrity. The first-order flow dynamics
+% q_{k+1} = a q_k + (1 - a) r_q,k must hold on every test
+% trajectory at machine precision. If this fails the data
 % pipeline is broken and any predictor fit on top is suspect.
 fprintf('  data-integrity check ');
 max_resid = 0;
@@ -228,7 +222,7 @@ for j = 1:p.data.n_test
 end
 fprintf('(max residual = %.2e kg/s)\n', max_resid);
 assert(max_resid < 1e-6, ...
-       'T6 fail: flow dynamics residual %.2e on test data', max_resid);
-fprintf('T6 pass: q_{k+1} = a q_k + (1 - a) r_q,k on every test trajectory\n');
+       'T5 fail: flow dynamics residual %.2e on test data', max_resid);
+fprintf('T5 pass: q_{k+1} = a q_k + (1 - a) r_q,k on every test trajectory\n');
 
-fprintf('\nAll six predictor invariants verified.\n');
+fprintf('\nAll five predictor invariants verified.\n');

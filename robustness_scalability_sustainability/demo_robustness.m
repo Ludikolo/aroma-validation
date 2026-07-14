@@ -3,8 +3,11 @@
 % results, prints the headline, and plots the longevity as two time-domain traces. The
 % worst-consumer demand-met stays flat across 90 days (no drift) and the per-day solve
 % time stays flat (no compute creep), so nothing in the prediction or the QP degrades
-% over a long run. The printed headline is the comparison: KPC leads the nonlinear
-% NMPC on demand at a fraction of the solve time, and beats the iterated Koopman-LMPC.
+% over a long run. The printed headline is the comparison: KPC ties the iterated
+% Koopman-LMPC at the capacity ceiling and beats the two plant-based controllers,
+% leading the nonlinear NMPC on demand at a fraction of the solve time.
+%
+% See robustness_validation.pdf, Section 3 (the figures) and Section 4 (the checks).
 
 clear; clc;
 here = fileparts(mfilename('fullpath'));

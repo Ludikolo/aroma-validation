@@ -1,8 +1,7 @@
 function traj = generate_traj(net, z0, p, T_sim, seed)
 % GENERATE_TRAJ  One plant trajectory under multi-channel
 % PRBS excitation. Returns a struct with every signal the dictionary
-% might want. 
-% One trajectory
+% might want.
 
 [r_q_fun, T0s_fun, ~] = excitation_multi(net, p, T_sim, seed);
 

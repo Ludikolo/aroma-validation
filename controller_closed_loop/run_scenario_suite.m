@@ -1,8 +1,8 @@
 % RUN_SCENARIO_SUITE  Six short closed-loop scenarios across the day at design
 % capacity. Each runs three controllers on the same warmed-up plant and the same
 % demand realisation: hold-nominal, demand-following RBC, and KPC. Saves all runs
-% to controller_closed_loop/results/scenario_suite.mat (consumed by demo_controller
-% and validate_controller).
+% to controller_closed_loop/results/scenario_suite.mat (consumed by demo_controller,
+% whose saved demo.mat is what validate_controller then checks).
 %
 %   S1_morning   07:00 start (residential morning peak)
 %   S2_midday    12:30 start (commercial midday peak)
@@ -58,7 +58,9 @@ for si = 1:numel(scenarios)
     res_wu = simulate_plant(net, z0_cold, p_wu, @(t) 0, @(t) 1.0, T_warm);
     cl_start = sc.start + T_warm;
 
-    % hold-nominal: open loop at nominal flow, supply at Tin_nom
+    % hold-nominal: open loop at nominal flow, supply at Tin_nom. this leg keeps
+    % simulate_plant's extra boundary sample (one more column than the kpc/rbc
+    % legs); demo_controller drops it when scoring, so the legs line up there
     p_hold = p; p_hold.t_offset = cl_start;
     res_hold = simulate_plant(net, res_wu.z_final, p_hold, @(t) 0, @(t) 1.0, T_sim);
     res_hold.T_0s = p.Tin_nom + res_hold.u;          % enrich so all legs carry the same fields

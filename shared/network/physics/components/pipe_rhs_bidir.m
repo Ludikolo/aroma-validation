@@ -51,13 +51,18 @@ function dT = pipe_rhs_bidir(~, T, p, Tin)
         end
     else
         % Upwind from the right (inlet at cell n)
-        % Cell n uses ghost value Tin; others use next cell.
-        advn      = -(v/dx) * (T(n)   - Tin);
+        % Cell n uses ghost value Tin; others use next cell. The advection
+        % speed is |v|: with v < 0 the raw -(v/dx) factor flips sign and
+        % pushes cells away from their upwind value (anti-advection). This
+        % branch is never reached in the shipped heating-mode runs (all
+        % flows positive, min +0.036 kg/s over every result file); fixed so
+        % the reverse-flow path is correct if it is ever exercised.
+        advn      = -(abs(v)/dx) * (T(n)   - Tin);
         lossn     = -a * (T(n) - Ta);
         dT(n)     = advn + lossn;
 
         if n > 1
-            adv_i     = -(v/dx) * (T(1:n-1) - T(2:n));
+            adv_i     = -(abs(v)/dx) * (T(1:n-1) - T(2:n));
             loss_i    = -a * (T(1:n-1) - Ta);
             dT(1:n-1) = adv_i + loss_i;
         end

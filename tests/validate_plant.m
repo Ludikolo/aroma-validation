@@ -10,16 +10,20 @@
 %   T2  T_r^(i) >= T_r_min on every step (5GDHC return-temperature floor).
 %   T3  Trunk Kirchhoff at steady state: q_F0->F1 = sum_i q^(i).
 %   T4  Capacity-binding behaviour matches scenario design.
-%   T5  Substation energy: c^(i) = cp * (T_s - T_r) * q^(i) at machine
-%       precision (AROMA mass-flow convention, so the factor is c_p
-%       not rho c_p; the equivalent rho c_p form holds for volumetric q).
+%   T5  Storage-pipeline consistency: the saved c^(i) equals
+%       cp * (T_s - T_r) * q^(i) recomputed from the saved arrays
+%       (AROMA mass-flow convention, so the factor is c_p not rho c_p).
+%       simulate_plant derives c_i from these same arrays, so this
+%       checks the save pipeline, not substation energy conservation.
 %   T6  Network energy ratio E_extracted / E_source_water in [0.5, 1.0]
 %       per scenario. The theta_1 = 0.7 source-mixing weight from the
 %       AROMA benchmark pins the lower bound
 %       near 0.7; thermal-storage contributions push the ratio higher
 %       in slow-flow scenarios.
-%   T7  c^(i) >= 0 AND T_r^(i) <= T_s^(i) on every step (the upper
-%       half of the substation contract).
+%   T7  Raw cp * (T_s - T_r) * q^(i) never below -1 W AND
+%       T_r^(i) <= T_s^(i) on every step (the upper half of the
+%       substation contract; the saved c_i is clipped at zero on save,
+%       so the raw product is the quantity that can actually fail).
 %   T8  Per-junction mass conservation on the full incidence matrices
 %       (every internal supply and return node, not just the trunk).
 %   T9  Source-side return mixing law: at steady state, the aggregate
@@ -82,7 +86,7 @@ for k = 1:n_scen
             % during the 0.5x phases that overlap demand peaks. Allowed
             % range mirrors the open-loop reality: above 70 % (the plant
             % is doing useful work) and below 95 % (capacity binds at
-            % some point in the run -- the dynamic-flow exercise).
+            % some point in the run, the dynamic-flow exercise).
             assert(pct > 70 && pct < 95, ...
                 'T4 fail: variable_flow should bind at some peak (got %.2f)', pct);
         otherwise
@@ -91,17 +95,21 @@ for k = 1:n_scen
 end
 fprintf('T4 ok: capacity-bound vs adequate-capacity scenarios behave as expected\n');
 
-%% T5 Substation energy: c^(i) = cp * (T_s^(i) - T_r^(i)) * q^(i)
-fprintf('\n=== Substation energy consistency ===\n');
+%% T5 Storage-pipeline consistency: saved c^(i) vs cp * (T_s - T_r) * q^(i)
+% simulate_plant computes c_i from the same T_s, T_r and q arrays that
+% end up in demo.mat, so this is a consistency check on the storage
+% pipeline (nothing scaled or reordered between simulation and disk),
+% not a proof of substation energy conservation.
+fprintf('\n=== Storage-pipeline consistency (c vs cp*dT*q) ===\n');
 for k = 1:n_scen
     sc = S.scenarios(k);
     c_check = p.cp * (sc.T_s_i - sc.T_r_i) .* sc.q_users;
     res_sub = max(abs(sc.c_i - c_check), [], 'all');
     fprintf('  %-15s  max |c - cp*dT*q| = %.2e W\n', sc.name, res_sub);
-    assert(res_sub < 1e-6, ...
-        'T5 fail: %s substation residual %.2e W exceeds machine precision', sc.name, res_sub);
+    assert(res_sub < 1e-9, ...
+        'T5 fail: %s storage-pipeline residual %.2e W', sc.name, res_sub);
 end
-fprintf('T5 ok: c^(i) = cp * (T_s - T_r) * q^(i) at machine precision\n');
+fprintf('T5 ok: saved c^(i) matches cp * (T_s - T_r) * q^(i) (residual < 1e-9 W)\n');
 
 %% T6 Network energy ratio: E_extracted / E_source_water in [0.5, 1.0]
 fprintf('\n=== Network energy ratio (theta1 = 0.7 artefact, see notes) ===\n');
@@ -119,23 +127,27 @@ for k = 1:n_scen
 end
 fprintf('T6 ok: E_extracted / E_source_water in [0.5, 1.0] in every scenario\n');
 
-%% T7 Substation upper contracts: T_r^(i) <= T_s^(i) AND c^(i) >= 0
+%% T7 Substation upper contracts: T_r^(i) <= T_s^(i) AND raw c >= 0
 % Pairs with T1 (c <= d) and T2 (T_r >= T_r_min) so that all four
 % bounds T_r^min <= T_r <= T_s and 0 <= c <= d are all explicitly
 % verified.
+% The saved c_i is clipped at zero by simulate_plant (max(0, ...) on
+% save), so asserting c_i >= 0 can never fail. The falsifiable quantity
+% is the raw product cp * (T_s - T_r) * q before the clip: it staying
+% above -1 W shows the physics never relied on the clip.
 fprintf('\n=== Substation upper contracts ===\n');
 for k = 1:n_scen
     sc = S.scenarios(k);
-    viol_c_neg = max(0, -min(sc.c_i(:)));
+    c_raw = p.cp * (sc.T_s_i - sc.T_r_i) .* sc.q_users;
     viol_Tr_Ts = max(sc.T_r_i(:) - sc.T_s_i(:));
-    fprintf('  %-15s  min(c_i) = %6.2f W   max(T_r - T_s) = %+6.3f K\n', ...
-        sc.name, min(sc.c_i(:)), max(sc.T_r_i(:) - sc.T_s_i(:)));
-    assert(viol_c_neg <= 1, ...
-        'T7 fail: %s c_i below 0 by %.2f W', sc.name, viol_c_neg);
+    fprintf('  %-15s  min(c_raw) = %6.2f W   max(T_r - T_s) = %+6.3f K\n', ...
+        sc.name, min(c_raw(:)), viol_Tr_Ts);
+    assert(min(c_raw(:)) > -1, ...
+        'T7 fail: %s raw cp*dT*q below -1 W (min %.2f W)', sc.name, min(c_raw(:)));
     assert(viol_Tr_Ts <= 0.1, ...
         'T7 fail: %s T_r above T_s by %.3f K', sc.name, viol_Tr_Ts);
 end
-fprintf('T7 ok: c^(i) >= 0 AND T_r^(i) <= T_s^(i) on every step in every scenario\n');
+fprintf('T7 ok: raw cp*dT*q > -1 W AND T_r^(i) <= T_s^(i) on every step in every scenario\n');
 
 %% T8 Per-junction mass conservation on the full incidence
 % Kirchhoff in incidence form:
@@ -149,22 +161,22 @@ fprintf('\n=== Per-junction mass conservation ===\n');
 K = build_incidence(net);
 for k = 1:n_scen
     sc = S.scenarios(k);
-    if ~isfield(sc, 'q_edges')
-        warning('T8: %s has no saved q_edges; re-run demo_plant.m', sc.name);
-        continue;
-    end
+    % a scenario without q_edges means demo.mat predates this check;
+    % that is a failure, not a skip
+    assert(isfield(sc, 'q_edges') && ~isempty(sc.q_edges), ...
+        'T8 fail: %s has no saved q_edges; re-run demo_plant.m', sc.name);
     n_last = max(1, numel(sc.t)-2):numel(sc.t);   % last 3 samples
     q_last = mean(sc.q_edges(:, n_last), 2);      % steady-state edge flows
     res_supply = max(abs(K.M_supply * q_last));
     res_return = max(abs(K.M_return * q_last));
     fprintf('  %-15s  supply residual = %.2e   return residual = %.2e   kg/s\n', ...
         sc.name, res_supply, res_return);
-    assert(res_supply < 1e-5, ...
+    assert(res_supply < 1e-9, ...
         'T8 fail: %s supply per-junction residual %.2e at steady state', sc.name, res_supply);
-    assert(res_return < 1e-5, ...
+    assert(res_return < 1e-9, ...
         'T8 fail: %s return per-junction residual %.2e at steady state', sc.name, res_return);
 end
-fprintf('T8 ok: M_supply * q = 0 AND M_return * q = 0 at every internal node\n');
+fprintf('T8 ok: M_supply * q = 0 AND M_return * q = 0 at every internal node (residual < 1e-9)\n');
 
 %% T9 Source-side return mixing law
 % Mixing law evaluated at the source's return junction:

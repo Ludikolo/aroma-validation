@@ -6,8 +6,8 @@ function [u_opt, info] = lmpc_solve(z_0, d_seq, u_prev, pred, p, net, tune)
 % equality, same energy term and move-blocking. The whole point is a
 % single-variable swap, so only two things differ from the KPC solver:
 %
-%   1. The prediction is the iterated roll-out, linearised around the
-%      previous step, so c_lin = cp (F z_0 + G U + b) carries the offset
+%   1. The prediction is the iterated roll-out, exact-affine in U, so
+%      c_pred = cp (F z_0 + G U + b) carries the demand roll-out offset
 %      pred.b and the T_r <= T_s constraint uses the predicted T_s
 %      F_Ts z_0 + Ts_off (the demand-driven part of T_s lives in the
 %      offset, exactly as KPC's demand-in-V extras put it there). KPC has
@@ -17,8 +17,9 @@ function [u_opt, info] = lmpc_solve(z_0, d_seq, u_prev, pred, p, net, tune)
 %      the per-junction mixing residual, so the controller cannot enforce
 %      it. Everything else is shared.
 %
-% The tune is the KPC tune with use_mixing off; every other knob behaves
-% identically.
+% The tune is the KPC tune with use_mixing off; every shared knob behaves
+% identically. The KPC-only knobs (bias_correction, admm_*) are not read
+% here, so they must stay unset on the LMPC tune.
 
 Np      = pred.Np;
 n_user  = pred.n_user;
@@ -63,9 +64,9 @@ LB = [LB_U; LB_S; LB_S; LB_S];
 UB = [UB_U; UB_S; UB_S; UB_S];
 
 %% c_lin <= d (soft, S_hi) and c_lin >= 0 (soft, S_lo)
-% c_lin = cp (F z_0 + G U + b), so the constant part is cp (F z_0 + b).
-% The b offset is what carries the op-point term and the known demand
-% roll-out; KPC carries the demand the same way through G_d D.
+% c_pred = cp (F z_0 + G U + b), so the constant part is cp (F z_0 + b).
+% The b offset carries the known demand roll-out; KPC carries the
+% demand the same way through G_d D.
 D_vec = reshape(d_seq', [], 1);   % consumer-major, matches the predictor
 F_z0  = pred.F * z_0 + pred.b;     % theta_lin without cp
 
@@ -301,6 +302,8 @@ if isfield(tune, 'warm_start_U') && ~isempty(tune.warm_start_U) ...
 else
     U_init = repmat(u_prev, Np, 1);
 end
+% slacks start at 1e6 (far above any physical violation) so the soft
+% rows cannot make the fallback x0 infeasible, same as kpc_v2_solve
 x0 = [U_init;
       1e6 * ones(n_S, 1);
       1e6 * ones(n_S, 1);

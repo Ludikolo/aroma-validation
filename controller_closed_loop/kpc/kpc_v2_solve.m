@@ -5,24 +5,26 @@ function [u_opt, info] = kpc_v2_solve(z_0, d_seq, u_prev, pred, p, net, tune)
 % inequalities c <= d, c >= 0, T_r <= T_s and the mixing law are
 % softened with slack variables (the V_seq predictor cannot guarantee
 % them at every step). Kirchhoff conservation is imposed on the
-% reference r_q rather than on q itself; with q_0 conservative this
-% keeps q conservative for all k.
+% reference r_q rather than on q itself; the setpoints are conservative
+% at every junction (not the loop-closure edge, see build_incidence_v2),
+% so q is conservative there at steady state, with a small transient
+% nodal residual while the per-edge lags settle.
 %
 % THEORY index:
-%   line 100: prediction
-%   line 119: soft demand cap
-%   line 129: rate limits
-%   line 165: Tr <= Ts
-%   line 179: delivery reward
-%   line 194: slack prices
-%   line 248: energy term
-%   line 282: move suppression
-%   line 297: total cost
-%   line 329: adequacy floor, hard
-%   line 357: mixing, soft
-%   line 374: Kirchhoff, hard
-%   line 407: move blocking
-%   line 501: fallback
+%   line 102: prediction
+%   line 121: soft demand cap
+%   line 131: rate limits
+%   line 167: Tr <= Ts
+%   line 181: delivery reward
+%   line 196: slack prices
+%   line 250: energy term
+%   line 284: move suppression
+%   line 299: total cost
+%   line 331: adequacy floor, hard
+%   line 359: mixing, soft
+%   line 376: Kirchhoff, hard
+%   line 411: move blocking
+%   line 508: fallback
 
 Np      = pred.Np;
 n_user  = pred.n_user;
@@ -318,8 +320,8 @@ end
 % demand-adequacy floor on the user-stub r_q
 % Capacity safeguard: r_q^(i)_h >= safety * d^(i)_h / (cp * dT_floor),
 % capped at 0.95 * r_q_max so peak demand stays feasible against the
-% rate constraints. Defaults match the published scenario-suite values;
-% tune can tighten them for longer-horizon runs.
+% rate constraints. The in-code defaults below apply only when tune is
+% silent; the production runs override adequacy_safety via best_tune (1.06).
 ei = edge_user_index(net);
 dT_floor = p.Tin_nom - p.consumer.T_r_min;
 if isfield(tune, 'dT_floor') && ~isempty(tune.dT_floor)
@@ -373,8 +375,10 @@ end
 
 % THEORY (Kirchhoff, hard): mass conservation on r_q at every junction, every horizon step
 % Kirchhoff equality on r_q
-% Imposed on the input rather than on q. With q_0 conservative and
-% r_q conservative every step, q stays conservative for all k.
+% Imposed on the input rather than on q. The setpoints are exactly
+% conservative, so the realised q is conservative at steady state; the
+% per-edge lags leave a small transient nodal residual that decays in a
+% few steps (they break ker(M) only while settling).
 use_kirch = isfield(tune, 'use_kirchhoff') && tune.use_kirchhoff;
 if use_kirch
     K = build_incidence_v2(net);
@@ -478,15 +482,18 @@ qp_opts = optimoptions('quadprog', ...
     'StepTolerance',       qp_step_tol, ...
     'MaxIterations',       qp_max_iter);
 
-% warm-start: previous-step U_seq if supplied, else repeat u_prev.
-% kpc_step_loop passes tune.warm_start_U = shifted prior optimum
-% to amortise QP iterations across MPC steps.
+% x0: previous-step U_seq if supplied, else repeat u_prev. The production
+% interior-point-convex algorithm ignores x0, so it is not a warm start
+% there; the real job of x0 is the fallback plan on a failed solve below.
+% kpc_step_loop passes tune.warm_start_U = shifted prior optimum.
 if isfield(tune, 'warm_start_U') && ~isempty(tune.warm_start_U) ...
         && numel(tune.warm_start_U) == n_U
     U_init = tune.warm_start_U(:);
 else
     U_init = repmat(u_prev, Np, 1);
 end
+% slacks start at 1e6 (far above any physical violation) so the soft
+% rows cannot make the fallback x0 infeasible
 x0 = [U_init;
       1e6 * ones(n_S, 1);
       1e6 * ones(n_S, 1);
@@ -495,14 +502,14 @@ x0 = [U_init;
 x0 = max(LB, min(UB, x0));
 
 tic;
-[x_opt, fval, exitflag, output] = quadprog(H, f, A_ineq, b_ineq, Aeq, beq, LB, UB, x0, qp_opts);
+[x_opt, fval, exitflag, output, lambda] = quadprog(H, f, A_ineq, b_ineq, Aeq, beq, LB, UB, x0, qp_opts);
 solve_ms = toc * 1000;
 
 % THEORY (fallback): on solver failure hold the previous plan instead of applying an invalid solution
 if exitflag <= 0
-    % Solver failure: hold the warm-start (repeated u_prev). The 50-test
-    % regression has never seen this branch fire; if it does in deployment
-    % the warning surfaces it and the next step starts from a fresh x0.
+    % Solver failure: hold the warm-start (repeated u_prev). Rare but real:
+    % the 90-day run hit this once in 8640 steps; the warning surfaces it,
+    % the exitflag is logged, and the next step starts from a fresh x0.
     warning('kpc_v2_solve: quadprog exitflag %d (%s)', exitflag, output.message);
     x_opt = x0;
 end
@@ -522,7 +529,7 @@ else
     S_mix_opt = [];
 end
 
-u_opt = U_opt(1:n_u); 
+u_opt = U_opt(1:n_u);
 info.U_seq      = reshape(U_opt,    n_u,    Np);
 % Consumer-major stacking: S_*_opt((i-1)*Np + h) is consumer i, horizon h.
 % reshape(., Np, n_user).' makes info.*_seq(i, h) = consumer i at horizon h.
@@ -545,6 +552,18 @@ info.c_pred     = p.cp * info.theta_pred;
 % consensus z and dual y vectors in sync with the QP layout.
 info.x_full     = x_opt;
 info.n_total    = n_total;
+% QP data and multipliers, exported so tests/validate_qp can check the
+% returned solution independently of the solver (feasibility residuals,
+% KKT conditions, cross-solver re-solve). Diagnostic only.
+info.H          = H;
+info.f          = f;
+info.A_ineq     = A_ineq;
+info.b_ineq     = b_ineq;
+info.Aeq        = Aeq;
+info.beq        = beq;
+info.LB         = LB;
+info.UB         = UB;
+info.lambda     = lambda;
 
 end
 

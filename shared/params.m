@@ -1,6 +1,4 @@
 function p = params()
-% All the parameters
-%
 % PARAMS  Plant parameters for the AROMA 5GDHC simulator.
 %   Every script reads parameters through this function so there are
 %   no magic numbers scattered across the codebase.
@@ -43,22 +41,22 @@ p.source.kQ     = 40000;
 p.source.theta1 = 0.70;
 
 %% Pipe heat loss to ambient
-% Small coefficient (insulated 5GDHC pipes; Buffa et al. 2019).
+% Small coefficient (insulated 5GDHC pipes; the Buffa 2019 5GDHC review).
 p.pipe.alpha = 1e-6;
 
 %% Prosumer (substation)
 % dT_ref = 5 K nominal extraction.
 %   Q_total = mdot_nom * cp * dT_ref = 62.7 kW network capacity.
 % T_r_min = 15 C: the substation pins the return at the floor when
-% capacity binds (rather than violating it). Yields ~21 kW c_max per
-% consumer at design flow, right at the commercial-peak demand so
+% capacity binds (rather than violating it). Yields c_max equal to each
+% consumer's peak demand at design flow (5 to 24 kW, ~21 kW for C2) so
 % the capacity envelope is genuinely meaningful.
 p.consumer.dT_ref  = 5;
 p.consumer.T_r_min = 15;
 
 %% Flow mode
 % 'exogenous'     : w(t) provided by the simulation script (default).
-% 'demand_driven' : w(t) = min(w_max, sum demand / (cp * mdot_nom * dT_L)). 
+% 'demand_driven' : w(t) = min(w_max, max(w_min, sum demand / (cp * mdot_nom * dT_L))).
 p.flow_mode = 'exogenous';
 
 % Demand-driven configuration (ignored in exogenous mode).

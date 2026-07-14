@@ -41,7 +41,7 @@ for k = 1:numel(scenarios)
         plot(t_min, sc.T_s_i(i, :), '-', 'Color', cmap(i, :), ...
              'LineWidth', 1.2, 'DisplayName', sprintf('C%d', i));
     end
-    yline(p.consumer.T_r_min, ':k');
+    yline(p.consumer.T_r_min, ':k', 'HandleVisibility', 'off');
     grid on; legend('Location', 'best');
     ylabel('T_s^{(i)} [C]'); xlabel('time [min]');
     title('Supply temperature received per consumer');

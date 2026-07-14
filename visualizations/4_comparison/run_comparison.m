@@ -2,8 +2,8 @@
 % stressed scenario and save the traces + metrics. The figure (viz_compare.m)
 % renders from the saved result, so the expensive run happens once.
 %
-% Controllers (all on the SAME plant, scenario, warmup and actuator limits, so
-% only the controller differs):
+% Controllers (all on the SAME plant, scenario, warmup and rate caps; the two
+% plant-based baselines keep the wider default boxes, see the fair_comparison harness):
 %   KPC            : direct multi-step Koopman prediction + one QP (this work)
 %   Koopman-LMPC   : same Koopman lift but an iterated one-step model + one QP
 %   Jacobian-LMPC  : re-linearise the nonlinear plant every step + one QP
@@ -12,7 +12,9 @@
 % The two Koopman controllers carry the demand-adequacy flow floor from the MPC
 % formulation; for a clean apples-to-apples we give the SAME floor to the two
 % plant-based baselines, so the only thing the comparison tests is the predictor
-% and the optimiser, not who got a demand-aware constraint.
+% and the optimiser, not who got a demand-aware constraint. Baseline solves apply
+% their last iterate even on a failed exitflag (10 NMPC steps report ef = -2 in the
+% saved run); the fair_comparison harness holds u_prev instead, the fallback KPC uses.
 
 clear; clc;
 here = fileparts(mfilename('fullpath'));
@@ -53,7 +55,7 @@ tune_lmpc = tune; tune_lmpc.use_mixing = false;
 % --- plant at stressed capacity + a shared warmup state ---
 [net, z0_cold] = build_plant(p);
 net.mdotEdges = mdot_scale * net.mdotEdges; net.flows = net.mdotEdges; net.q0 = net.mdotEdges(:);
-ei = edge_user_index(net); n_user = ei.n_user; n_edges = numel(net.Edges);
+ei = edge_user_index(net); n_user = ei.n_user;
 F0_idx = find(strcmp({net.Nodes.name}, 'F0'));
 R0_idx = find(strcmp({net.Nodes.name}, 'R0'));
 con_idx = arrayfun(@(i) find(strcmp({net.Nodes.name}, ei.consumers{i})), 1:n_user);
@@ -143,6 +145,8 @@ function [A, bcon, lb, ub] = build_cons(u_prev, cfg, d_now)
 nxi = size(cfg.N, 2);
 P   = [zeros(numel(cfg.md), 1), cfg.N];     % r_q = md + P*x
 rqp = u_prev(2:end); md = cfg.md; e1 = [1, zeros(1, nxi)];
+% rows: flow box (P*x <= 0.5 md -> r_q <= 1.5 md; -P*x <= 0.7 md ->
+% r_q >= 0.3 md, the PRBS lower factor), flow rate caps, T0s rate caps
 A = [ P; -P; P; -P; e1; -e1 ];
 bcon = [ 0.5*md; 0.7*md; cfg.drq + (rqp - md); cfg.drq - (rqp - md); ...
          u_prev(1) + cfg.dT0s; -(u_prev(1) - cfg.dT0s) ];
